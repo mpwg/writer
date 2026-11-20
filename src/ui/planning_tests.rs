@@ -126,6 +126,7 @@ fn timeline_preserves_the_event_time_draft_when_saving_a_scene_time(cx: &mut Tes
         enter_text(window, event_time, "Bei Sonnenaufgang", cx);
         window.click(("page", 1_usize), cx);
         window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("outline-edit-scene", cx);
         window.click("scene-details", cx);
         enter_text(window, scene_time, "Nach Mitternacht", cx);
         window.click("set-scene-time", cx);
@@ -203,6 +204,7 @@ fn timeline_reports_cycle_without_changing_the_saved_relations(cx: &mut TestAppC
         .to_vec();
     interact(&workspace, cx, |window, cx| {
         window.click(format!("event-{SECOND_EVENT}"), cx);
+        window.click("event-link-picker", cx);
         window.click(format!("target-{FIRST_EVENT}"), cx);
         window.click("Liegt vor", cx);
     });
@@ -227,6 +229,9 @@ fn timeline_opens_the_scene_derived_from_an_event(cx: &mut TestAppContext) {
     interact(&workspace, cx, |window, cx| {
         window.click(format!("event-{FIRST_EVENT}"), cx);
         window.click("derive-scene", cx);
+        assert!(window.find("confirm-derived-scene").visible());
+        window.click("confirm-derived-scene", cx);
+        window.click("open-derived-scene", cx);
         assert!(window.find("scene-details").visible());
     });
 
@@ -248,6 +253,7 @@ fn outline_creates_a_chapter_and_places_a_scene_with_the_buttons(cx: &mut TestAp
     let title = workspace.update(cx, |view, _, _| view.chapter_title.entity_id());
     interact(&workspace, cx, |window, cx| {
         window.click(("page", 1_usize), cx);
+        window.click("new-chapter", cx);
         enter_text(window, title, " Die Überfahrt ", cx);
         window.click("chapter-add", cx);
     });
@@ -262,7 +268,15 @@ fn outline_creates_a_chapter_and_places_a_scene_with_the_buttons(cx: &mut TestAp
         window.click(format!("chapter-{created}"), cx);
         enter_text(window, title, "Späte Überfahrt", cx);
         window.click("chapter-rename", cx);
-        window.click(format!("place-{SIGNAL_SCENE}"), cx);
+        window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("outline-scene-actions", cx);
+        assert!(window.find("popup-menu").visible());
+        // Removing the current placement is first, then the other existing
+        // chapter, then the chapter just added and renamed.
+        for _ in 0..3 {
+            window.press("down", cx);
+        }
+        window.press("enter", cx);
     });
     let outline = Outline::from_project(&reopen(&workspace));
     assert_eq!(outline.chapters().last().unwrap().title, "Späte Überfahrt");
@@ -332,6 +346,7 @@ fn scene_details_save_time_and_toggle_a_relative_bound(cx: &mut TestAppContext) 
     interact(&workspace, cx, |window, cx| {
         window.click(("page", 1_usize), cx);
         window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("outline-edit-scene", cx);
         window.click("scene-details", cx);
         enter_text(window, time, "Nach Mitternacht", cx);
         window.click("set-scene-time", cx);
@@ -346,11 +361,13 @@ fn scene_details_save_time_and_toggle_a_relative_bound(cx: &mut TestAppContext) 
     interact(&workspace, cx, |window, cx| {
         window.click(("page", 1_usize), cx);
         window.click(format!("scene-{START_SCENE}"), cx);
+        window.click("outline-edit-scene", cx);
         window.click("scene-details", cx);
         assert_eq!(window.find(("input", time)).value(), Some(""));
 
         window.click(("page", 1_usize), cx);
         window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("outline-edit-scene", cx);
         window.click("scene-details", cx);
         assert_eq!(
             window.find(("input", time)).value(),
@@ -361,4 +378,170 @@ fn scene_details_save_time_and_toggle_a_relative_bound(cx: &mut TestAppContext) 
     interact(&workspace, cx, |window, cx| window.click(before, cx));
     let outline = Outline::from_project(&reopen(&workspace));
     assert_eq!(outline.scene(SIGNAL_SCENE).unwrap().timing.before, None);
+}
+
+#[gpui_kit::test]
+fn timeline_keeps_event_fields_in_a_separate_inspector(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let title = workspace.update(cx, |view, _, _| view.event_title.entity_id());
+    interact(&workspace, cx, |window, cx| {
+        let first_event = format!("event-{FIRST_EVENT}");
+        assert!(window.try_find(("input", title)).is_none());
+        window.click(first_event.clone(), cx);
+        let card = window.find(first_event).bounds();
+        let field = window.find(("input", title)).bounds();
+        assert!(card.right() < field.left());
+    });
+}
+
+#[gpui_kit::test]
+fn outline_discloses_chapter_children_without_hiding_other_chapters(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let disclosure = format!("chapter-disclosure-{FIRST_CHAPTER}");
+    let scene = format!("scene-{START_SCENE}");
+    interact(&workspace, cx, |window, cx| {
+        window.click(("page", 1_usize), cx);
+        assert!(window.find(scene.clone()).visible());
+        window.click(disclosure.clone(), cx);
+        assert!(window.try_find(scene.clone()).is_none());
+        assert!(window.find(format!("scene-{SIGNAL_SCENE}")).visible());
+        window.click(disclosure, cx);
+        assert!(window.find(scene).visible());
+    });
+}
+
+#[gpui_kit::test]
+fn outline_selection_keeps_chapters_visible_until_explicit_edit(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    interact(&workspace, cx, |window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        assert!(window.find(format!("chapter-{SECOND_CHAPTER}")).visible());
+        assert!(window.find("outline-scene-position").visible());
+        assert!(
+            window
+                .find(format!("outline-timeline-event-{FIRST_EVENT}"))
+                .visible()
+        );
+        window.click("outline-edit-scene", cx);
+        assert!(window.find("scene-details").visible());
+    });
+}
+
+#[gpui_kit::test]
+fn narrow_timeline_restores_focus_when_returning_from_details(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    cx.simulate_window_resize(
+        workspace.window,
+        gpui_kit::size(gpui_kit::px(740.), gpui_kit::px(720.)),
+    );
+    interact(&workspace, cx, |window, cx| {
+        let event = format!("event-{FIRST_EVENT}");
+        window.click(event.clone(), cx);
+        assert!(window.try_find(event.clone()).is_none());
+        window.click("close-event-inspector", cx);
+        assert_eq!(window.find(event).focused(), Some(true));
+    });
+}
+
+#[gpui_kit::test]
+fn outline_context_menu_moves_a_scene_without_changing_its_time(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let before = Outline::from_project(&reopen(&workspace));
+    let scene = before.scene(SIGNAL_SCENE).unwrap();
+    interact(&workspace, cx, |window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.right_click(format!("scene-{SIGNAL_SCENE}"), cx);
+    });
+    interact(&workspace, cx, |window, cx| {
+        assert!(window.find("popup-menu").visible());
+        // The first command removes the scene from its chapter. The next
+        // command places it in the other chapter.
+        window.press("down", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
+    });
+    let outline = Outline::from_project(&reopen(&workspace));
+    assert_eq!(outline.chapter_of(SIGNAL_SCENE), Some(FIRST_CHAPTER));
+    assert_eq!(outline.scene(SIGNAL_SCENE).unwrap().timing, scene.timing);
+}
+
+#[gpui_kit::test]
+fn timeline_separates_unordered_events_from_temporal_paths(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let third_event = Id::from_u128(0x00000000_0000_4000_8000_000000000003);
+    let unordered = format!("event-{third_event}");
+    interact(&workspace, cx, |window, _| {
+        let network = window.find("event-network").bounds();
+        let card = window.find(unordered).bounds();
+        let section = window.find("timeline-unordered").bounds();
+        assert!(card.top() >= network.bottom());
+        assert!(section.contains(&card.origin));
+    });
+}
+
+#[gpui_kit::test]
+fn changing_a_relationship_type_replaces_the_selected_edge(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let event_path = workspace.root.join("Planung/Erstkontakt.md");
+    let document = std::fs::read_to_string(&event_path).unwrap();
+    let document = document.replace(
+        "    time: 100 Jahre später",
+        "    time: 100 Jahre später\n    redaktion: Erstfassung",
+    );
+    std::fs::write(&event_path, document).unwrap();
+    workspace.update(cx, |view, _, _| view.refresh_project().unwrap());
+    interact(&workspace, cx, |window, cx| {
+        window.click(
+            format!("network-link-{FIRST_EVENT}-{SECOND_EVENT}-Before"),
+            cx,
+        );
+        window.click("Verursacht", cx);
+    });
+    let timeline = Timeline::from_project(&reopen(&workspace));
+    let [edge] = timeline.relations() else {
+        panic!("Nach dem Typwechsel muss genau eine Verbindung bestehen");
+    };
+    assert_eq!(edge.kind, Relation::Cause);
+    assert_eq!((edge.from, edge.to), (FIRST_EVENT, SECOND_EVENT));
+    assert_eq!(edge.time.as_deref(), Some("100 Jahre später"));
+    assert!(
+        std::fs::read_to_string(event_path)
+            .unwrap()
+            .contains("redaktion: Erstfassung")
+    );
+}
+
+#[gpui_kit::test]
+fn narrow_outline_restores_focus_to_the_selected_scene(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    cx.simulate_window_resize(
+        workspace.window,
+        gpui_kit::size(gpui_kit::px(740.), gpui_kit::px(720.)),
+    );
+    interact(&workspace, cx, |window, cx| {
+        let scene = format!("scene-{SIGNAL_SCENE}");
+        window.click(("page", 1_usize), cx);
+        window.click(scene.clone(), cx);
+        assert!(window.try_find(scene.clone()).is_none());
+        window.click("close-outline-inspector", cx);
+        assert_eq!(window.find(scene).focused(), Some(true));
+    });
+}
+
+#[gpui_kit::test]
+fn timeline_inspector_resizes_from_its_splitter(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let title = workspace.update(cx, |view, _, _| view.event_title.entity_id());
+    interact(&workspace, cx, |window, cx| {
+        window.click(format!("event-{FIRST_EVENT}"), cx);
+        let left = window.find(("input", title)).bounds().left();
+        let split = window
+            .within("timeline-split")
+            .find(("resizable-handle", 0_usize));
+        let start = split.bounds().center();
+        let end = start - gpui_kit::point(gpui_kit::px(60.), gpui_kit::px(0.));
+        window.drag(start, end, cx);
+        assert!(window.find(("input", title)).bounds().left() < left);
+    });
 }

@@ -8,17 +8,28 @@ mod planning;
 mod world;
 use std::{path::PathBuf, time::Duration};
 
+use super::recent_projects::{Location, RecentProjects};
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-    ActiveTheme, Disableable,
+    ActiveTheme, Disableable, Selectable, Sizable,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState, TextDecoration, Textarea, TextareaState},
+    resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
+    status_bar::StatusBar,
 };
 use gpui_kit::{prelude::FluentBuilder, *};
 actions!(
     writer_actions,
-    [NewProject, OpenProject, SaveProject, UndoScene, QuitWriter]
+    [
+        NewProject,
+        OpenProject,
+        SaveProject,
+        UndoScene,
+        QuitWriter,
+        ProjectSettings,
+        ProjectExport
+    ]
 );
 
 use writer::{
@@ -27,14 +38,33 @@ use writer::{
     storage::{ConflictResolution, Store},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum Page {
     Timeline,
     Outline,
     Scene,
     Manuscript,
     World,
     Codex,
+    Consistency,
+    Settings,
+    Research,
+}
+
+impl Page {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Timeline => "Timeline",
+            Self::Outline => "Kapitel",
+            Self::Scene => "Schreiben",
+            Self::Manuscript => "Manuskript",
+            Self::World => "Weltkartei",
+            Self::Codex => "Lücke erkunden",
+            Self::Consistency => "Konsistenzprüfung",
+            Self::Settings => "Projekteinstellungen",
+            Self::Research => "Frage zur Geschichte",
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,6 +74,11 @@ enum SceneInspector {
 }
 
 const SCENE_INSPECTOR_MIN_WIDTH: Pixels = px(1120.);
+const BOOK_SERIF: &str = if cfg!(target_os = "linux") {
+    "serif"
+} else {
+    "Georgia"
+};
 
 pub struct ProjectView {
     keyboard_focus: FocusHandle,
@@ -55,6 +90,7 @@ pub struct ProjectView {
     busy: bool,
     error: Option<String>,
     project: Option<Project>,
+    recent_projects: RecentProjects,
     selected_scene: Option<Id>,
     show_issues: bool,
     store: Option<Store>,
@@ -63,11 +99,17 @@ pub struct ProjectView {
     merge_path: Option<PathBuf>,
     autosave: Option<Task<()>>,
     last_version: Option<String>,
+    has_unversioned_changes: bool,
+    version_query: Option<Task<()>>,
     last_export: Option<PathBuf>,
     scene_inspector: Option<SceneInspector>,
+    preview_trigger: FocusHandle,
+    details_trigger: FocusHandle,
     scene_text: Option<SceneText>,
     scene_baseline: Option<writer::Document>,
     page: Page,
+    sidebar_collapsed: bool,
+    planning: planning::PlanningView,
     event: Option<Id>,
     chapter: Option<Id>,
     event_target: Option<Id>,
@@ -85,6 +127,28 @@ pub struct ProjectView {
 }
 
 impl ProjectView {
+    pub(crate) fn restore_recent_projects(&mut self) {
+        if let Some(path) = RecentProjects::default_path() {
+            self.load_recent_projects(path);
+        }
+    }
+
+    fn load_recent_projects(&mut self, path: PathBuf) {
+        self.recent_projects = RecentProjects::read(path);
+    }
+
+    fn remember_location(&mut self, window: &mut Window) {
+        let Some(project) = &self.project else { return };
+        let location = Location {
+            page: self.page,
+            scene: self.selected_scene,
+        };
+        window.set_window_title(&format!("{} — {}", project.title(), self.page.title()));
+        if let Err(error) = self.recent_projects.remember(project, location) {
+            eprintln!("Die letzte Projektansicht konnte nicht gespeichert werden. {error}");
+        }
+    }
+
     pub(crate) fn install_quit_action(cx: &mut App) {
         cx.on_action(|_: &QuitWriter, cx| {
             // Tastaturaktionen laufen in einem Fenster-Update. Erst danach sind alle Fenster zugänglich.
@@ -151,11 +215,17 @@ impl ProjectView {
             merge_path: None,
             autosave: None,
             last_version: None,
+            has_unversioned_changes: false,
+            version_query: None,
             last_export: None,
             scene_inspector: None,
+            preview_trigger: cx.focus_handle(),
+            details_trigger: cx.focus_handle(),
             scene_text: None,
             scene_baseline: None,
             page: Page::Timeline,
+            sidebar_collapsed: false,
+            planning: planning::PlanningView::default(),
             event: None,
             chapter: None,
             event_target: None,
@@ -178,6 +248,7 @@ impl ProjectView {
             busy: false,
             error: None,
             project: None,
+            recent_projects: RecentProjects::default(),
             selected_scene: None,
             show_issues: false,
         }
@@ -287,27 +358,46 @@ impl ProjectView {
         self.error = None;
         cx.notify();
         let load = cx.background_executor().spawn(async move {
+            let root = std::path::absolute(&root)
+                .map_err(|source| writer::ProjectError::Io { path: root, source })?;
             let project = match title {
                 Some(title) => Project::create(&root, &title),
                 None => Project::open(&root),
             }?;
             let store = Store::new(project.root())?;
-            Ok::<_, writer::ProjectError>((project, store))
+            let latest_version = store.latest_version_time();
+            let has_unversioned_changes = store.has_unversioned_changes().unwrap_or_default();
+            Ok::<_, writer::ProjectError>((project, store, latest_version, has_unversioned_changes))
         });
         cx.spawn_in(window, async move |view, cx| {
             let result = load.await;
             let _ = view.update_in(cx, |view, window, cx| {
                 view.busy = false;
                 match result {
-                    Ok((project, store)) => {
+                    Ok((project, store, latest_version, has_unversioned_changes)) => {
+                        let location = view.recent_projects.location(project.root());
                         view.store = Some(store);
-                        view.last_version = None;
+                        view.last_version = latest_version;
+                        view.has_unversioned_changes = has_unversioned_changes;
                         view.project = Some(project);
                         view.reset_workspace(window, cx);
                         view.restore_ai(window, cx);
                         view.selected_scene = None;
                         view.show_issues = false;
                         view.creation_origin = None;
+                        if let Some(location) = location {
+                            if let Some(scene) = location.scene.filter(|&id| {
+                                view.project
+                                    .as_ref()
+                                    .is_some_and(|project| project.scene(id).is_some())
+                            }) {
+                                view.select_scene(scene, window, cx);
+                            }
+                            if location.page != Page::Scene {
+                                view.navigate(location.page, window, cx);
+                            }
+                        }
+                        view.remember_location(window);
                         window.focus(&view.keyboard_focus, cx);
                     }
                     Err(error) => view.error = Some(error.to_string()),
@@ -327,6 +417,63 @@ impl ProjectView {
             .flex_col()
             .gap_4()
             .child(div().text_2xl().child("Buchprojekt öffnen"))
+            .when(
+                self.creation_origin.is_none() && !self.recent_projects.entries().is_empty(),
+                |picker| {
+                    picker.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                div()
+                                    .bg(cx.theme().sidebar)
+                                    .px_3()
+                                    .py_2()
+                                    .text_sm()
+                                    .child("Zuletzt geöffnet"),
+                            )
+                            .children(self.recent_projects.entries().iter().enumerate().map(
+                                |(index, entry)| {
+                                    let root = entry.root.clone();
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .px_3()
+                                        .pb_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(entry.title.clone())
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child(entry.root.display().to_string()),
+                                                ),
+                                        )
+                                        .child(
+                                            Button::new(("recent-project", index))
+                                                .small()
+                                                .label("Öffnen")
+                                                .disabled(self.busy)
+                                                .on_click(cx.listener(
+                                                    move |view, _, window, cx| {
+                                                        view.load(root.clone(), None, window, cx);
+                                                    },
+                                                )),
+                                        )
+                                },
+                            )),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex()
@@ -465,8 +612,35 @@ impl ProjectView {
                 self.scene_baseline = Some(document.clone());
             }
             self.manuscript_saved();
+            self.refresh_version_status(cx);
         }
         self.report(result, cx)
+    }
+
+    fn refresh_version_status(&mut self, cx: &mut Context<Self>) {
+        let Some(project) = &self.project else { return };
+        let root = project.root().to_owned();
+        self.version_query = Some(cx.spawn(async move |view, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let result =
+                        Store::new(&root).and_then(|store| store.has_unversioned_changes());
+                    (root, result)
+                })
+                .await;
+            let _ = view.update(cx, |view, cx| {
+                if let (root, Ok(changed)) = result
+                    && view
+                        .project
+                        .as_ref()
+                        .is_some_and(|project| project.root() == root)
+                {
+                    view.has_unversioned_changes = changed;
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     fn report(&mut self, result: writer::Result<()>, cx: &mut Context<Self>) -> bool {
@@ -497,6 +671,7 @@ impl ProjectView {
         self.selected_scene = Some(id);
         self.load_scene_time(id, window, cx);
         self.scene_opened(window, cx);
+        self.remember_location(window);
         cx.notify();
     }
 
@@ -518,6 +693,7 @@ impl ProjectView {
                     Ok(checkpoint) => {
                         view.last_version = Some(checkpoint.committed_at);
                         view.error = None;
+                        view.refresh_version_status(cx);
                     }
                     Err(error) => {
                         view.error = Some(format!(
@@ -543,6 +719,7 @@ impl ProjectView {
             .resolve(resolution)
             .and_then(|()| self.refresh_project());
         if self.report(result, cx) {
+            self.refresh_version_status(cx);
             if self.page == Page::Manuscript
                 && let Some(project) = &self.project
             {
@@ -573,36 +750,57 @@ impl ProjectView {
         }
     }
 
-    fn save_controls(&self, cx: &mut Context<Self>) -> Div {
+    fn document_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let pending = self.store.as_ref().is_some_and(Store::is_pending);
+        let conflict = self.store.as_ref().and_then(Store::conflict);
+        let state = if conflict.is_some() {
+            "Dateikonflikt"
+        } else if self.autosave.is_some() {
+            "Wird auf Festplatte gesichert …"
+        } else if pending {
+            "Dateiänderungen ausstehend"
+        } else {
+            "Auf Festplatte gesichert"
+        };
+        let mut status = StatusBar::new().left(state);
+        if !pending && self.has_unversioned_changes {
+            status = status.left(
+                div()
+                    .id("changes-since-version")
+                    .child("Änderungen seit letzter Version")
+                    .test_support(),
+            );
+        }
+        if let Some(time) = &self.last_version {
+            status = status.left(format!("Letzte lokale Version {time}"));
+        }
+        if self.page == Page::Scene && self.selected_scene.is_some() {
+            status = status.right("Markdown");
+        }
+        if pending && conflict.is_none() && self.autosave.is_none() {
+            status = status.child(
+                Button::new("retry")
+                    .ghost()
+                    .small()
+                    .label("Sicherung erneut versuchen")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.flush(cx);
+                    })),
+            );
+        }
+        div()
+            .id("document-status")
+            .flex_shrink_0()
+            .child(status)
+            .test_support()
+    }
+
+    fn conflict_controls(&self, cx: &mut Context<Self>) -> Div {
         let conflict = self.store.as_ref().and_then(Store::conflict);
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(if pending {
-                        "Dateiänderungen ausstehend"
-                    } else {
-                        "Auf Festplatte gesichert"
-                    })
-                    .when_some(self.last_version.clone(), |row, time| {
-                        row.child(format!("Letzte Version {time}"))
-                    })
-                    .when(pending && conflict.is_none(), |row| {
-                        row.child(
-                            Button::new("retry")
-                                .label("Sicherung erneut versuchen")
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    view.flush(cx);
-                                })),
-                        )
-                    }),
-            )
             .when_some(conflict, |pane, conflict| {
                 let merge = self.merge.read(cx).value();
                 let validation = conflict.validate_merge(merge.as_bytes());
@@ -660,7 +858,9 @@ impl ProjectView {
     }
 
     fn reset_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.version_query = None;
         self.page = Page::Timeline;
+        self.planning = planning::PlanningView::default();
         self.event = None;
         self.chapter = None;
         self.event_target = None;
@@ -696,6 +896,7 @@ impl ProjectView {
         {
             self.export_view = Some(manuscript::ManuscriptView::new(project, window, cx));
         }
+        self.remember_location(window);
         cx.notify();
     }
 
@@ -742,16 +943,16 @@ impl ProjectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.scene_inspector == Some(inspector) {
-            self.scene_inspector = None;
-            if window.viewport_size().width < SCENE_INSPECTOR_MIN_WIDTH {
-                self.editor
-                    .update(cx, |editor, cx| editor.focus(window, cx));
-            }
-        } else {
-            self.scene_inspector = Some(inspector);
-        }
+        self.scene_inspector = (self.scene_inspector != Some(inspector)).then_some(inspector);
+        window.focus(self.scene_inspector_trigger(inspector), cx);
         cx.notify();
+    }
+
+    fn scene_inspector_trigger(&self, inspector: SceneInspector) -> &FocusHandle {
+        match inspector {
+            SceneInspector::Preview => &self.preview_trigger,
+            SceneInspector::Details => &self.details_trigger,
+        }
     }
 
     fn scene_editor(&self, scene: Id, cx: &mut Context<Self>) -> Div {
@@ -782,11 +983,13 @@ impl ProjectView {
                     .flex_wrap()
                     .gap_2()
                     .children(actions.into_iter().map(|(id, title, format, concept)| {
-                        Button::new(id).label(title).on_click(cx.listener(
-                            move |view, _, window, cx| {
+                        Button::new(id)
+                            .small()
+                            .ghost()
+                            .label(title)
+                            .on_click(cx.listener(move |view, _, window, cx| {
                                 view.scene_action(format, concept, window, cx)
-                            },
-                        ))
+                            }))
                     })),
             )
             .child(
@@ -795,7 +998,14 @@ impl ProjectView {
                     .on_action(cx.listener(|view, _: &UndoScene, window, cx| {
                         view.scene_action(None, None, window, cx)
                     }))
-                    .child(Textarea::new(&self.editor).aria_label("Szenentext")),
+                    .w_full()
+                    .max_w(px(650.))
+                    .mx_auto()
+                    .child(
+                        Textarea::new(&self.editor)
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .aria_label("Szenentext"),
+                    ),
             )
             .child(self.scene_assistance(scene, cx));
         let Some(text) = &self.scene_text else {
@@ -825,6 +1035,16 @@ impl ProjectView {
         };
         let split = window.viewport_size().width >= SCENE_INSPECTOR_MIN_WIDTH;
         let current = self.scene_inspector;
+        let outline = writer::outline::Outline::from_project(project);
+        let chapter = outline
+            .chapters()
+            .iter()
+            .enumerate()
+            .find(|(_, chapter)| chapter.scenes.contains(&scene.id()))
+            .map_or_else(
+                || "Ohne Kapitel".into(),
+                |(index, chapter)| format!("Kapitel {} · {}", index + 1, chapter.title),
+            );
         let inspector_actions = [
             (
                 "preview",
@@ -844,12 +1064,34 @@ impl ProjectView {
             .flex_wrap()
             .items_center()
             .gap_2()
-            .child(div().flex_1().text_lg().child(scene.title().to_owned()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(scene.title().to_owned()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(chapter),
+                    ),
+            )
             .children(
                 inspector_actions
                     .into_iter()
                     .map(|(id, open, close, inspector)| {
                         Button::new(id)
+                            .small()
+                            .ghost()
+                            .track_focus(self.scene_inspector_trigger(inspector))
+                            .selected(current == Some(inspector))
                             .label(if current == Some(inspector) {
                                 close
                             } else {
@@ -860,31 +1102,57 @@ impl ProjectView {
                             }))
                     }),
             );
-        let panes = div()
-            .flex()
-            .gap_4()
-            .items_start()
-            .when(split || current.is_none(), |panes| {
-                panes.child(self.scene_editor(scene.id(), cx))
-            })
-            .when_some(current, |panes, inspector| {
-                let content = match inspector {
-                    Details => self
-                        .scene_timing(project, scene.id(), cx)
-                        .into_any_element(),
-                    Preview => div()
-                        .id("scene-preview")
-                        .children(self.scene_text.as_ref().map(|text| {
-                            gpui_kit::component::text::TextView::markdown(
-                                "markdown-preview",
-                                writer::export::preview_markdown(text),
-                            )
-                        }))
-                        .test_support()
-                        .into_any_element(),
-                };
-                panes.child(
-                    div()
+        let editor = (split || current.is_none()).then(|| self.scene_editor(scene.id(), cx));
+        let inspector = current.map(|inspector| match inspector {
+            Details => self.scene_timing(project, scene.id(), cx),
+            Preview => div().child(
+                div()
+                    .id("scene-preview")
+                    .w_full()
+                    .font_family(BOOK_SERIF)
+                    .children(self.scene_text.as_ref().map(|text| {
+                        gpui_kit::component::text::TextView::markdown(
+                            "markdown-preview",
+                            writer::export::preview_markdown(text),
+                        )
+                    }))
+                    .test_support(),
+            ),
+        });
+        let resizable = self.scene_inspector_is_resizable(project, window);
+        let panes = match (editor, inspector) {
+            (Some(editor), Some(inspector)) if resizable => div().flex_1().min_h_0().child(
+                h_resizable("scene-split")
+                    .child(
+                        resizable_panel().child(
+                            editor
+                                .p_4()
+                                .overflow_y_scrollbar()
+                                .id("scene-editor-scroll"),
+                        ),
+                    )
+                    .child(
+                        resizable_panel()
+                            .size(px(340.))
+                            .size_range(px(235.)..px(520.))
+                            .fixed()
+                            .child(
+                                inspector
+                                    .size_full()
+                                    .p_4()
+                                    .bg(cx.theme().sidebar)
+                                    .overflow_y_scrollbar()
+                                    .id("scene-inspector-scroll"),
+                            ),
+                    ),
+            ),
+            (editor, inspector) => div()
+                .flex()
+                .items_start()
+                .gap_4()
+                .children(editor)
+                .children(inspector.map(|panel| {
+                    panel
                         .min_w_0()
                         .flex_shrink_0()
                         .when(split, |panel| {
@@ -895,48 +1163,102 @@ impl ProjectView {
                                 .pl_4()
                         })
                         .when(!split, |panel| panel.w_full())
-                        .child(content),
-                )
-            });
-        div().flex().flex_col().gap_3().child(toolbar).child(panes)
+                })),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .gap_3()
+            .child(toolbar.when(resizable, |bar| {
+                bar.flex_shrink_0()
+                    .px_4()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+            }))
+            .child(panes)
     }
 
-    fn workspace(&self, project: &Project, window: &Window, cx: &mut Context<Self>) -> Div {
-        let pages = [
-            (Page::Timeline, "Timeline"),
-            (Page::Outline, "Kapitel"),
-            (Page::Scene, "Szene"),
-            (Page::Manuscript, "Manuskript"),
-            (Page::World, "Welt"),
-            (Page::Codex, "Codex"),
-        ];
+    fn scene_inspector_is_resizable(&self, project: &Project, window: &Window) -> bool {
+        self.scene_inspector.is_some()
+            && window.viewport_size().width >= SCENE_INSPECTOR_MIN_WIDTH
+            && project.issues().is_empty()
+            && self
+                .store
+                .as_ref()
+                .is_none_or(|store| store.conflict().is_none())
+    }
+
+    fn workspace(&self, project: &Project, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let narrow = window.viewport_size().width < px(790.);
-        let rail = if cx.theme().is_dark() {
-            rgb(0x302c29)
-        } else {
-            rgb(0xf0eae0)
-        };
-        let selection = if cx.theme().is_dark() {
-            rgb(0x77aea3)
-        } else {
-            rgb(0x235a54)
+        let nav_button = |index: usize, page: Page, label: &'static str, cx: &mut Context<Self>| {
+            Button::new(("page", index))
+                .ghost()
+                .small()
+                .label(label)
+                .selected(self.page == page)
+                .when(!narrow, |button| button.w_full().justify_start())
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    if page == Page::Settings {
+                        view.open_project_settings(window, cx);
+                    } else {
+                        view.navigate(page, window, cx);
+                    }
+                }))
         };
         let navigation = div()
             .flex()
-            .flex_shrink_0()
-            .gap_2()
-            .bg(rail)
-            .p_3()
-            .when(narrow, |rail| rail.flex_wrap())
-            .when(!narrow, |rail| rail.flex_col().w(px(184.)))
-            .children(pages.into_iter().enumerate().map(|(index, (page, label))| {
-                Button::new(("page", index))
-                    .label(label)
-                    .when(self.page == page, |button| button.primary())
-                    .on_click(
-                        cx.listener(move |view, _, window, cx| view.navigate(page, window, cx)),
-                    )
-            }));
+            .gap_1()
+            .p_2()
+            .bg(cx.theme().sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .when(narrow, |nav| {
+                nav.flex_wrap().border_b_1().border_color(cx.theme().border)
+            })
+            .when(!narrow, |nav| nav.flex_col().size_full())
+            .when(!narrow, |nav| {
+                nav.child(
+                    div()
+                        .px_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Buchprojekt"),
+                )
+            })
+            .children(
+                [
+                    (0, Page::Timeline, "Timeline"),
+                    (1, Page::Outline, "Kapitel"),
+                    (2, Page::Scene, "Schreiben"),
+                    (3, Page::Manuscript, "Manuskript"),
+                    (4, Page::World, "Welt"),
+                ]
+                .into_iter()
+                .map(|(index, page, label)| nav_button(index, page, label, cx)),
+            )
+            .when(!narrow, |nav| {
+                nav.child(
+                    div()
+                        .mt_3()
+                        .px_2()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Projektwerkzeuge"),
+                )
+            })
+            .child(nav_button(6, Page::Consistency, "Konsistenz", cx))
+            .child(nav_button(7, Page::Settings, "Einstellungen", cx));
+        let has_conflict = self
+            .store
+            .as_ref()
+            .is_some_and(|store| store.conflict().is_some());
+        let own_scroll = !has_conflict
+            && project.issues().is_empty()
+            && (matches!(self.page, Page::Timeline | Page::Outline)
+                || self.page == Page::Codex && Self::wide_brainstorm(window)
+                || self.page == Page::Scene && self.scene_inspector_is_resizable(project, window));
         let content = div()
             .flex()
             .flex_col()
@@ -944,7 +1266,7 @@ impl ProjectView {
             .min_w_0()
             .min_h_0()
             .gap_4()
-            .p_4()
+            .when(!own_scroll, |panel| panel.p_4())
             .when(!project.issues().is_empty(), |content| {
                 content
                     .child(
@@ -970,37 +1292,111 @@ impl ProjectView {
                         )
                     })
             })
-            .child(self.save_controls(cx))
+            .when(
+                self.store
+                    .as_ref()
+                    .is_some_and(|store| store.conflict().is_some()),
+                |content| content.child(self.conflict_controls(cx)),
+            )
             .child(match self.page {
-                Page::Timeline => self.timeline_view(project, cx),
-                Page::Outline => self.outline_view(project, cx),
+                Page::Timeline => self.timeline_view(project, window, cx),
+                Page::Outline => self.outline_view(project, window, cx),
                 Page::Scene => self.scene_view(project, window, cx),
-                Page::Manuscript => self.manuscript_view(cx),
-                Page::World => self.world_view(project, cx),
-                Page::Codex => self.assistance_view(project, cx),
-            })
-            .overflow_y_scrollbar()
-            .id(("workspace-page", self.page as usize));
+                Page::Manuscript => self.manuscript_view(window, cx),
+                Page::World => self.world_view(project, window, cx),
+                Page::Codex => self.assistance_view(project, window, cx),
+                Page::Consistency => self.consistency_page(project, cx),
+                Page::Settings => self.settings_page(project, cx),
+                Page::Research => self.research_page(project, cx),
+            });
+        let content = if own_scroll {
+            content.into_any_element()
+        } else {
+            content
+                .overflow_y_scrollbar()
+                .id((
+                    if has_conflict {
+                        "workspace-conflict"
+                    } else {
+                        "workspace-page"
+                    },
+                    self.page as usize,
+                ))
+                .into_any_element()
+        };
+        let body = div().flex().flex_col().flex_1().min_h_0();
+        let body = if self.sidebar_collapsed {
+            body.child(content)
+        } else if narrow {
+            body.child(navigation).child(content)
+        } else {
+            body.child(
+                h_resizable("document-split")
+                    .child(
+                        resizable_panel()
+                            .size(px(200.))
+                            .size_range(px(150.)..px(320.))
+                            .fixed()
+                            .child(navigation),
+                    )
+                    .child(resizable_panel().child(content)),
+            )
+        };
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
-            .gap_3()
             .child(
                 div()
                     .flex()
                     .flex_shrink_0()
                     .flex_wrap()
                     .items_center()
-                    .gap_3()
-                    .pb_3()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
                     .border_b_1()
-                    .border_color(selection)
-                    .child(div().flex_1().text_2xl().child(project.title().to_owned()))
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().muted)
+                    .child(
+                        Button::new("toggle-source-list")
+                            .small()
+                            .ghost()
+                            .label(if self.sidebar_collapsed {
+                                "Quellliste einblenden"
+                            } else {
+                                "Quellliste ausblenden"
+                            })
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.sidebar_collapsed = !view.sidebar_collapsed;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_wrap()
+                            .items_baseline()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(project.title().to_owned()),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(self.page.title()),
+                            ),
+                    )
                     .child(
                         Button::new("checkpoint")
                             .label("Speichern")
+                            .small()
                             .primary()
                             .tooltip("Lokale Git-Version erstellen")
                             .disabled(self.busy)
@@ -1010,7 +1406,9 @@ impl ProjectView {
                     )
                     .child(
                         Button::new("choose-project")
-                            .label("Zur Projektwahl")
+                            .label("Projektwahl")
+                            .small()
+                            .ghost()
                             .disabled(self.busy)
                             .on_click(cx.listener(|view, _, window, cx| {
                                 if view.flush(cx) {
@@ -1019,28 +1417,30 @@ impl ProjectView {
                                     view.project = None;
                                     view.store = None;
                                     view.error = None;
+                                    window.set_window_title("Schreibwerkstatt");
                                     cx.notify();
                                 }
                             })),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_2()
-                    .when(narrow, |layout| layout.flex_col())
-                    .child(navigation)
-                    .child(content),
-            )
+            .child(body)
+            .when_some(self.error.as_ref(), |shell, error| {
+                shell.child(
+                    div()
+                        .flex_shrink_0()
+                        .p_2()
+                        .text_color(cx.theme().danger)
+                        .child(error.clone()),
+                )
+            })
+            .child(self.document_status(cx))
     }
 }
 
 impl Render for ProjectView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.prepare_merge(window, cx);
-        let dark = cx.theme().is_dark();
+        let choosing_project = self.project.is_none() || self.creation_origin.is_some();
         div()
             .id("workspace")
             .track_focus(&self.keyboard_focus)
@@ -1060,15 +1460,20 @@ impl Render for ProjectView {
                             view.checkpoint(window, cx)
                         }),
                     )
+                    .on_action(cx.listener(|view, _: &ProjectSettings, window, cx| {
+                        view.open_project_settings(window, cx)
+                    }))
+                    .on_action(cx.listener(
+                        |view, _: &ProjectExport, window, cx| view.show_export_formats(window, cx),
+                    ))
                 },
             )
             .flex()
             .flex_col()
             .size_full()
             .overflow_hidden()
-            .bg(if dark { rgb(0x252220) } else { rgb(0xfbf8f2) })
-            .text_color(if dark { rgb(0xf0eae0) } else { rgb(0x27231e) })
-            .p_5()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .child(match &self.project {
                 Some(project) if self.creation_origin.is_none() => {
                     self.workspace(project, window, cx).into_any_element()
@@ -1076,11 +1481,12 @@ impl Render for ProjectView {
                 _ => div()
                     .flex_1()
                     .min_h_0()
+                    .p_5()
                     .child(self.welcome(cx))
                     .overflow_y_scrollbar()
                     .into_any_element(),
             })
-            .when(self.busy, |content| {
+            .when(choosing_project && self.busy, |content| {
                 content.child(
                     div()
                         .flex_shrink_0()
@@ -1088,9 +1494,10 @@ impl Render for ProjectView {
                         .child("Projekt wird vorbereitet …"),
                 )
             })
-            .when_some(self.error.clone(), |content, error| {
-                content.child(div().flex_shrink_0().mt_2().child(error))
-            })
+            .when_some(
+                self.error.clone().filter(|_| choosing_project),
+                |content, error| content.child(div().flex_shrink_0().mt_2().child(error)),
+            )
     }
 }
 

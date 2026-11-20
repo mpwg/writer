@@ -1,7 +1,10 @@
 mod ui;
 
 use gpui_kit::*;
-use ui::project::{NewProject, OpenProject, ProjectView, QuitWriter, SaveProject, UndoScene};
+use ui::project::{
+    NewProject, OpenProject, ProjectExport, ProjectSettings, ProjectView, QuitWriter, SaveProject,
+    UndoScene,
+};
 
 fn main() {
     let app = application().with_assets(assets::Assets);
@@ -13,6 +16,8 @@ fn main() {
         #[cfg(target_os = "macos")]
         cx.set_menus([
             Menu::new("Schreibwerkstatt").items([
+                MenuItem::action("Projekteinstellungen …", ProjectSettings),
+                MenuItem::separator(),
                 MenuItem::os_submenu("Dienste", SystemMenuType::Services),
                 MenuItem::separator(),
                 MenuItem::action("Schreibwerkstatt beenden", QuitWriter),
@@ -22,6 +27,7 @@ fn main() {
                 MenuItem::action("Buchprojekt öffnen …", OpenProject),
                 MenuItem::separator(),
                 MenuItem::action("Speichern", SaveProject),
+                MenuItem::action("Manuskript exportieren …", ProjectExport),
             ]),
         ]);
         open_workspace_window(cx);
@@ -42,10 +48,15 @@ fn open_workspace_window(cx: &mut App) {
             size(px(920.), px(680.)),
             cx,
         ))),
+        window_min_size: Some(size(px(640.), px(480.))),
         ..Default::default()
     };
     match open_window(options, cx, |window, cx| {
-        cx.new(|cx| ProjectView::new(window, cx))
+        cx.new(|cx| {
+            let mut view = ProjectView::new(window, cx);
+            view.restore_recent_projects();
+            view
+        })
     }) {
         Ok(_) => cx.activate(true),
         Err(error) => {
@@ -63,8 +74,17 @@ fn editor_undo_shortcut() -> &'static str {
     }
 }
 
-fn writer_key_bindings() -> [KeyBinding; 5] {
+fn writer_key_bindings() -> [KeyBinding; 6] {
     [
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-,"
+            } else {
+                "ctrl-,"
+            },
+            ProjectSettings,
+            None,
+        ),
         KeyBinding::new(
             if cfg!(target_os = "macos") {
                 "cmd-n"

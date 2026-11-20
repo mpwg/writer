@@ -13,6 +13,7 @@ pub(super) struct ManuscriptView {
     start: Option<Anchor>,
     end: Option<Anchor>,
     replacement: Entity<TextareaState>,
+    export_formats: bool,
 }
 
 impl ManuscriptView {
@@ -32,6 +33,7 @@ impl ManuscriptView {
                 let editor = cx.new(|cx| {
                     let mut state = TextareaState::new(window, cx).rows(8);
                     state.set_value(scene.text.text().to_owned(), window, cx);
+                    apply_concept_decorations(&mut state, &scene.text, cx);
                     state
                 });
                 cx.subscribe_in(
@@ -59,6 +61,7 @@ impl ManuscriptView {
             start: None,
             end: None,
             replacement: cx.new(|cx| TextareaState::new(window, cx).rows(3)),
+            export_formats: false,
         }
     }
 }
@@ -69,7 +72,14 @@ impl ProjectView {
             return;
         };
         match view.book.edit_scene(id, text) {
-            Ok(()) => self.stage_manuscript(window, cx),
+            Ok(()) => {
+                if let Some((editor, scene)) = view.editors.get(&id).zip(view.book.scene(id)) {
+                    editor.update(cx, |editor, cx| {
+                        apply_concept_decorations(editor, &scene.text, cx)
+                    });
+                }
+                self.stage_manuscript(window, cx);
+            }
             Err(error) => {
                 self.error = Some(error.to_string());
                 cx.notify();
@@ -154,7 +164,8 @@ impl ProjectView {
                 let text = scene.text.text();
                 if editor.read(cx).value().as_ref() != text {
                     editor.update(cx, |editor, cx| {
-                        editor.set_value(text.to_owned(), window, cx)
+                        editor.set_value(text.to_owned(), window, cx);
+                        apply_concept_decorations(editor, &scene.text, cx);
                     });
                 }
             }
@@ -200,74 +211,129 @@ impl ProjectView {
         .detach();
     }
 
-    pub(super) fn manuscript_view(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn show_export_formats(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate(Page::Manuscript, window, cx);
+        if self.page == Page::Manuscript
+            && let Some(view) = &mut self.export_view
+        {
+            view.export_formats = true;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn manuscript_view(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let Some(view) = &self.export_view else {
             return div();
         };
-        div()
+        let narrow = window.viewport_size().width < px(1000.);
+        let toolbar = div()
             .flex()
-            .flex_col()
-            .gap_3()
+            .flex_wrap()
+            .justify_between()
+            .items_center()
+            .gap_2()
+            .pb_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new("export-md")
-                            .label("Markdown exportieren")
-                            .disabled(self.busy)
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                view.choose_export(ExportFormat::Markdown, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("export-pdf")
-                            .label("PDF exportieren")
-                            .disabled(self.busy)
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                view.choose_export(ExportFormat::Pdf, window, cx)
-                            })),
-                    ),
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Gesamtmanuskript"),
             )
-            .when_some(self.last_export.as_ref(), |pane, path| {
-                let file = path.clone();
-                pane.child(
-                    Button::new("show-export")
-                        .label(format!(
-                            "Datei öffnen · {}",
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        ))
-                        .on_click(move |_, _, cx| cx.open_with_system(&file)),
-                )
+            .child(
+                Button::new("manuscript-export")
+                    .small()
+                    .primary()
+                    .label("Export …")
+                    .selected(view.export_formats)
+                    .disabled(self.busy)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        if let Some(view) = &mut view.export_view {
+                            view.export_formats = !view.export_formats;
+                            cx.notify();
+                        }
+                    })),
+            );
+        let formats = div()
+            .flex()
+            .items_center()
+            .flex_wrap()
+            .gap_2()
+            .child("Exportformat")
+            .children(
+                [
+                    ("export-pdf", "Formatiertes PDF", ExportFormat::Pdf),
+                    ("export-md", "Markdown", ExportFormat::Markdown),
+                ]
+                .into_iter()
+                .map(|(id, label, format)| {
+                    Button::new(id)
+                        .small()
+                        .label(label)
+                        .disabled(self.busy)
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            view.choose_export(format, window, cx);
+                        }))
+                }),
+            );
+        let index = div()
+            .flex()
+            .gap_1()
+            .p_3()
+            .bg(cx.theme().sidebar)
+            .when(narrow, |index| index.flex_wrap().items_center())
+            .when(!narrow, |index| {
+                index.flex_shrink_0().flex_col().w(px(192.))
             })
             .child(
-                div().flex().flex_wrap().gap_2().children(
-                    view.book
-                        .chapters()
-                        .iter()
-                        .enumerate()
-                        .map(|(index, chapter)| {
-                            let first = chapter.scenes.first().copied();
-                            Button::new(("chapter-jump", index))
-                                .label(chapter.title.clone())
-                                .on_click(cx.listener(move |view, _, window, cx| {
-                                    if let Some(editor) = first
-                                        .and_then(|id| view.export_view.as_ref()?.editors.get(&id))
-                                    {
-                                        editor.read(cx).focus_handle(cx).focus(window, cx);
-                                    }
-                                }))
-                        }),
-                ),
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Inhaltsverzeichnis"),
             )
+            .children(
+                view.book
+                    .chapters()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, chapter)| {
+                        let first = chapter.scenes.first().copied();
+                        Button::new(("chapter-jump", index))
+                            .ghost()
+                            .small()
+                            .label(chapter.title.clone())
+                            .when(!narrow, |item| item.w_full().justify_start())
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                if let Some(editor) =
+                                    first.and_then(|id| view.export_view.as_ref()?.editors.get(&id))
+                                {
+                                    editor.read(cx).focus_handle(cx).focus(window, cx);
+                                }
+                            }))
+                    }),
+            );
+        let pages = div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .w_full()
+            .max_w(px(760.))
+            .mx_auto()
+            .p_5()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_2()
                     .child("Szenenübergreifend ersetzen")
-                    .child(Textarea::new(&view.replacement))
+                    .child(
+                        Textarea::new(&view.replacement)
+                            .aria_label("Szenenübergreifender Ersatztext"),
+                    )
                     .child(
                         div()
                             .flex()
@@ -292,7 +358,12 @@ impl ProjectView {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(div().text_xl().child(chapter.title.clone()))
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_family(BOOK_SERIF)
+                            .child(chapter.title.clone()),
+                    )
                     .children(chapter.scenes.iter().filter_map(|id| {
                         let id = *id;
                         let (scene, editor) = view.book.scene(id).zip(view.editors.get(&id))?;
@@ -330,18 +401,52 @@ impl ProjectView {
                                                 })),
                                         ),
                                 )
-                                .child(Textarea::new(editor))
+                                .child(
+                                    Textarea::new(editor)
+                                        .appearance(false)
+                                        .font_family(BOOK_SERIF)
+                                        .aria_label(scene.title.clone()),
+                                )
                                 .children(scene.text.concepts().iter().map(|concept| {
-                                    div().border_l_2().border_color(rgb(0xb98a37)).pl_2().child(
-                                        format!(
+                                    div()
+                                        .border_l_2()
+                                        .border_color(cx.theme().warning)
+                                        .pl_2()
+                                        .child(format!(
                                             "Konzept · {}",
                                             &scene.text.text()[concept.range.clone()]
-                                        ),
-                                    )
+                                        ))
                                 })),
                         )
                     }))
-            }))
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(toolbar)
+            .when(view.export_formats, |pane| pane.child(formats))
+            .when_some(self.last_export.as_ref(), |pane, path| {
+                let file = path.clone();
+                pane.child(
+                    Button::new("show-export")
+                        .ghost()
+                        .label(format!(
+                            "Datei öffnen · {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ))
+                        .on_click(move |_, _, cx| cx.open_with_system(&file)),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .min_w_0()
+                    .bg(cx.theme().muted)
+                    .when(narrow, |layout| layout.flex_col())
+                    .child(index)
+                    .child(div().flex_1().min_w_0().p_4().child(pages)),
+            )
     }
 }
 
@@ -355,6 +460,35 @@ mod tests {
     const START: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000006);
     const SIGNAL: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
     const ERSTKONTAKT: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000001);
+
+    #[gpui_kit::test]
+    fn manuscript_places_contents_next_to_the_page_and_discloses_export_formats(
+        cx: &mut TestAppContext,
+    ) {
+        let workspace = test_support::open(cx);
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click(("page", 3usize), cx);
+                let editor = workspace
+                    .view
+                    .read(cx)
+                    .export_view
+                    .as_ref()
+                    .unwrap()
+                    .editors[&START]
+                    .entity_id();
+                assert!(
+                    window.find(("chapter-jump", 0_usize)).bounds().right()
+                        <= window.find(("input", editor)).bounds().left()
+                );
+                assert!(window.try_find("export-pdf").is_none());
+                window.click("manuscript-export", cx);
+                assert!(window.find("export-pdf").visible());
+                assert!(window.find("export-md").visible());
+            })
+            .unwrap();
+    }
 
     #[gpui_kit::test]
     fn manuscript_replacement_and_undo_update_both_scene_files(cx: &mut TestAppContext) {
@@ -461,6 +595,10 @@ mod tests {
             "Die Sonde startet.\n"
         );
 
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.click("manuscript-export", cx))
+            .unwrap();
         for (button, name) in [("export-md", "Buch.md"), ("export-pdf", "Buch.pdf")] {
             workspace
                 .window

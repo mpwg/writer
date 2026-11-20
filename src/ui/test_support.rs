@@ -115,6 +115,99 @@ fn copy_project(source: &Path, target: &Path) {
 }
 
 #[gpui_kit::test]
+fn settings_shortcut_opens_the_project_tools_and_closes_back_to_the_scene(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+    let workspace = open(cx);
+    let scene = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(scene, window, cx));
+    cx.simulate_keystrokes(
+        workspace.window,
+        if cfg!(target_os = "macos") {
+            "cmd-,"
+        } else {
+            "ctrl-,"
+        },
+    );
+    workspace.update(cx, |view, _, _| assert_eq!(view.page, Page::Settings));
+    workspace
+        .window
+        .update(cx, |_, window, cx| window.click("close-settings", cx))
+        .unwrap();
+    workspace.update(cx, |view, _, _| {
+        assert_eq!(view.page, Page::Scene);
+        assert_eq!(view.selected_scene, Some(scene));
+    });
+}
+
+#[gpui_kit::test]
+fn document_status_distinguishes_autosave_from_a_local_version(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    Store::new(&workspace.root)
+        .unwrap()
+        .checkpoint("Ausgangsstand")
+        .unwrap();
+    let scene = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(scene, window, cx));
+    workspace
+        .window
+        .update(cx, |_, window, cx| {
+            window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+            window.input("Noch ohne lokale Version. ", cx);
+        })
+        .unwrap();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
+    workspace
+        .window
+        .update(cx, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("changes-since-version").is_some());
+            window.click("checkpoint", cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    workspace
+        .window
+        .update(cx, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("changes-since-version").is_none());
+        })
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn document_window_keeps_status_visible_and_can_collapse_the_source_list(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    cx.simulate_window_resize(workspace.window, size(px(1100.), px(620.)));
+    workspace
+        .window
+        .update(cx, |_, window, cx| {
+            window.render_frame(cx);
+            let footer = window.try_find("document-status");
+            assert!(footer.as_ref().is_some_and(|status| status.visible()));
+            let footer = footer.unwrap().bounds();
+            assert!(footer.top() > px(540.));
+            assert!(window.find(("page", 0_usize)).visible());
+
+            window.click("toggle-source-list", cx);
+            assert!(window.try_find(("page", 0_usize)).is_none());
+            assert_eq!(window.find("document-status").bounds(), footer);
+            assert!(window.find("checkpoint").visible());
+
+            window.click("toggle-source-list", cx);
+            window.click(("page", 1_usize), cx);
+            assert_eq!(window.find("document-status").bounds(), footer);
+        })
+        .unwrap();
+    workspace.update(cx, |view, _, _| assert!(view.page == Page::Outline));
+}
+
+#[gpui_kit::test]
 fn open_project_shortcut_saves_pending_text_before_switching_books(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
@@ -227,6 +320,57 @@ fn new_project_shortcut_can_return_to_the_previous_scene(cx: &mut TestAppContext
     })
     .unwrap();
     workspace.update(cx, |view, _, _| assert_eq!(view.selected_scene, Some(id)));
+}
+
+#[gpui_kit::test]
+fn project_picker_reopens_a_recent_book_at_its_last_scene(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open_workspace(cx, false);
+    let initial_version = Store::new(&workspace.root)
+        .unwrap()
+        .checkpoint("Ausgangsstand")
+        .unwrap();
+    let settings = workspace.root.with_file_name("Zuletzt geöffnet.json");
+    workspace.update(cx, |view, _, _| view.load_recent_projects(settings.clone()));
+    workspace
+        .window
+        .update(cx, |_, window, cx| window.click("open", cx))
+        .unwrap();
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
+    let scene = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(scene, window, cx));
+
+    let (fresh_window, fresh_view) = mount_view(cx, None);
+    cx.update_window(fresh_window, |_, window, cx| {
+        fresh_view.update(cx, |view, cx| {
+            view.load_recent_projects(settings);
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert!(window.try_find(("recent-project", 0_usize)).is_some());
+        window.click(("recent-project", 0_usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(fresh_window, |_, _, cx| {
+        let view = fresh_view.read(cx);
+        assert!(view.page == Page::Scene);
+        assert_eq!(view.selected_scene, Some(scene));
+        assert_eq!(
+            view.last_version.as_deref(),
+            Some(initial_version.committed_at.as_str())
+        );
+        assert!(
+            view.editor
+                .read(cx)
+                .value()
+                .contains("Eine Tür öffnet sich.")
+        );
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]
@@ -370,12 +514,23 @@ fn wide_scene_places_the_preview_next_to_the_editor(cx: &mut TestAppContext) {
     let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
     workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
     cx.update_window(workspace.window, |_, window, cx| {
-        window.click("preview", cx);
         let field = ("input", workspace.view.read(cx).editor.entity_id());
+        window.render_frame(cx);
+        assert!(window.find(field).bounds().size.width <= px(660.));
+        window.click("preview", cx);
         let editor = window.find(field).bounds();
         let preview = window.find("scene-preview").bounds();
         assert!(editor.right() <= preview.left());
         assert!(preview.top() < editor.bottom());
+        let divider = window
+            .find_all(("resizable-handle", 0_usize))
+            .into_iter()
+            .map(|handle| handle.bounds())
+            .max_by(|a, b| a.left().partial_cmp(&b.left()).unwrap())
+            .unwrap();
+        let from = divider.center();
+        window.drag(from, point(from.x - px(48.), from.y), cx);
+        assert!(window.find("scene-preview").bounds().size.width > preview.size.width);
 
         window.click("scene-details", cx);
         assert!(window.try_find("scene-preview").is_none());
@@ -385,7 +540,9 @@ fn wide_scene_places_the_preview_next_to_the_editor(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn narrow_scene_preview_returns_to_the_same_editor_selection(cx: &mut TestAppContext) {
+fn narrow_scene_preview_restores_the_trigger_and_keeps_the_editor_selection(
+    cx: &mut TestAppContext,
+) {
     use gpui_kit::test::TestWindowExt;
 
     let workspace = open(cx);
@@ -405,7 +562,8 @@ fn narrow_scene_preview_returns_to_the_same_editor_selection(cx: &mut TestAppCon
         assert!(window.find("scene-preview").visible());
 
         window.click("preview", cx);
-        assert_eq!(window.find(field).focused(), Some(true));
+        assert!(window.find(field).visible());
+        assert_eq!(window.find("preview").focused(), Some(true));
     })
     .unwrap();
     workspace.update(cx, |view, _, cx| {
@@ -595,6 +753,7 @@ fn conflict_resolution_survives_reopening_the_book_in_a_new_view(cx: &mut TestAp
     cx.update_window(fresh_window, |_, window, cx| {
         window.click(("page", 1_usize), cx);
         window.click(format!("scene-{id}"), cx);
+        window.click("outline-edit-scene", cx);
         let editor = fresh_view.read(cx).editor.entity_id();
         let observed = window.find(("input", editor));
         let text = observed.value().unwrap();

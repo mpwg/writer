@@ -1,4 +1,11 @@
 use super::*;
+use gpui_kit::{
+    base::StyledExt as _,
+    component::{
+        resizable::{h_resizable, resizable_panel},
+        switch::Switch,
+    },
+};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -10,7 +17,7 @@ use writer::{
     ai::{
         AiEvent, AiPreferences, AiRequest, AiSession, AiStatus, RequestId,
         brainstorm::{Brainstorm, IdeaPart, Link, LinkDirection, Role},
-        consistency::{Finding, FindingSource, Review, ReviewStatus},
+        consistency::{Finding, FindingSource, Review, ReviewStatus, SourceSection},
         details::{DetailQueue, Suggestion, Trigger},
         draft::Draft,
         research::{Evidence, Scenario, TemporalScope},
@@ -18,7 +25,7 @@ use writer::{
     outline::Outline,
     passage::{Anchor, SceneText},
     sources::{Resolution, Sources},
-    timeline::{Relation, Timeline},
+    timeline::{Event, Relation, TemporalOrder, Timeline},
 };
 
 enum Pending {
@@ -38,6 +45,26 @@ enum Pending {
     Research(ResearchRun),
     ResearchSummary(Vec<Citation>),
     Consistency(ConsistencyRun),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Activity {
+    Connection,
+    Brainstorm,
+    Research,
+    Consistency,
+    Scene,
+}
+
+impl Pending {
+    fn activity(&self) -> Activity {
+        match self {
+            Self::Brainstorm { .. } => Activity::Brainstorm,
+            Self::Research(_) | Self::ResearchSummary(_) => Activity::Research,
+            Self::Consistency(_) => Activity::Consistency,
+            Self::Draft { .. } | Self::Detail { .. } => Activity::Scene,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -105,6 +132,12 @@ struct ModelDetail {
     text: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FindingSelection {
+    Open(usize),
+    Marked(Id),
+}
+
 pub(super) struct Assistance {
     preferences: Option<AiPreferences>,
     session: AiSession,
@@ -113,20 +146,27 @@ pub(super) struct Assistance {
     poll_task: Option<Task<()>>,
     pending: Option<(RequestId, Pending)>,
     input: Entity<TextareaState>,
+    brainstorm_input: Entity<TextareaState>,
+    research_input: Entity<TextareaState>,
     excerpt: Entity<TextareaState>,
     answer: Entity<TextareaState>,
     note: Entity<InputState>,
+    consistency_reason: Entity<InputState>,
+    settings_origin: Option<(Page, Option<FocusHandle>)>,
     pair_seed: Option<Id>,
     brainstorm: Option<Brainstorm>,
     brainstorm_message: Option<Id>,
     idea: Option<Id>,
     links: Vec<Link>,
     login: Option<String>,
-    status: Option<String>,
+    messages: BTreeMap<Activity, String>,
     streaming: String,
     at: Option<Id>,
     answers: Vec<Answer>,
     findings: Vec<Finding>,
+    selected_finding: Option<FindingSelection>,
+    show_decisions: bool,
+    explaining_finding: Option<usize>,
     draft: Option<Draft>,
     draft_thread: Option<(Id, String)>,
     details: DetailQueue,
@@ -147,20 +187,27 @@ impl Assistance {
             poll_task: None,
             pending: None,
             input: cx.new(|cx| TextareaState::new(window, cx).rows(4)),
+            brainstorm_input: cx.new(|cx| TextareaState::new(window, cx).rows(3)),
+            research_input: cx.new(|cx| TextareaState::new(window, cx).rows(3)),
             excerpt: cx.new(|cx| TextareaState::new(window, cx).rows(3)),
             answer: cx.new(|cx| TextareaState::new(window, cx).rows(7)),
             note: cx.new(|cx| InputState::new(window, cx)),
+            consistency_reason: cx.new(|cx| InputState::new(window, cx)),
+            settings_origin: None,
             pair_seed: None,
             brainstorm: None,
             brainstorm_message: None,
             idea: None,
             links: Vec::new(),
             login: None,
-            status: None,
+            messages: BTreeMap::new(),
             streaming: String::new(),
             at: None,
             answers: Vec::new(),
             findings: Vec::new(),
+            selected_finding: None,
+            show_decisions: false,
+            explaining_finding: None,
             draft: None,
             draft_thread: None,
             details: DetailQueue::default(),
@@ -174,16 +221,26 @@ impl Assistance {
         self.pair_seed = None;
         self.clear_brainstorm();
         self.at = None;
-        self.status = None;
         self.answers.clear();
         self.findings.clear();
+        self.selected_finding = None;
+        self.show_decisions = false;
+        self.explaining_finding = None;
+        self.settings_origin = None;
         self.draft = None;
         self.draft_thread = None;
-        for field in [&self.input, &self.answer, &self.excerpt] {
+        for field in [
+            &self.input,
+            &self.brainstorm_input,
+            &self.research_input,
+            &self.answer,
+            &self.excerpt,
+        ] {
             field.update(cx, |field, cx| field.set_value("", window, cx));
         }
-        self.note
-            .update(cx, |field, cx| field.set_value("", window, cx));
+        for field in [&self.note, &self.consistency_reason] {
+            field.update(cx, |field, cx| field.set_value("", window, cx));
+        }
     }
 
     fn clear_brainstorm(&mut self) {
@@ -200,6 +257,7 @@ impl Assistance {
         self.login = None;
         self.poll_task = None;
         self.streaming.clear();
+        self.messages.clear();
         self.details.set_enabled(false);
         self.delayed_details.clear();
         self.editing_suggestion = None;
@@ -207,6 +265,29 @@ impl Assistance {
 }
 
 impl ProjectView {
+    pub(super) fn open_project_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let origin = self.page;
+        let focus = window.focused(cx);
+        self.navigate(Page::Settings, window, cx);
+        if origin != Page::Settings && self.page == Page::Settings {
+            self.ai.settings_origin = Some((origin, focus));
+        }
+    }
+
+    fn close_project_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let origin = self
+            .ai
+            .settings_origin
+            .as_ref()
+            .map_or(Page::Timeline, |(page, _)| *page);
+        self.navigate(origin, window, cx);
+        if self.page == origin
+            && let Some((_, Some(focus))) = self.ai.settings_origin.take()
+        {
+            focus.focus(window, cx);
+        }
+    }
+
     pub(super) fn restore_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(project) = &self.project else { return };
         if self
@@ -228,7 +309,9 @@ impl ProjectView {
         if let Some(prefs) = &self.ai.preferences
             && let Err(error) = prefs.set_enabled(project.root(), project.id(), enabled)
         {
-            self.ai.status = Some(error.to_string());
+            self.ai
+                .messages
+                .insert(Activity::Connection, error.to_string());
             cx.notify();
             return;
         }
@@ -236,8 +319,6 @@ impl ProjectView {
             self.ai.enabled = true;
             self.ai.details.set_enabled(true);
             self.connect_ai(window, cx);
-        } else {
-            self.ai.status = None;
         }
         cx.notify();
     }
@@ -247,12 +328,12 @@ impl ProjectView {
             return;
         }
         self.ai.poll_task = None;
-        self.ai.status = self
-            .ai
-            .session
-            .enable(self.ai.cli.as_deref())
-            .err()
-            .map(|error| error.to_string());
+        self.ai.messages.remove(&Activity::Connection);
+        if let Err(error) = self.ai.session.enable(self.ai.cli.as_deref()) {
+            self.ai
+                .messages
+                .insert(Activity::Connection, error.to_string());
+        }
         self.ai.login = None;
         self.ai.poll_task = Some(cx.spawn_in(window, async move |view, cx| {
             loop {
@@ -292,16 +373,17 @@ impl ProjectView {
         if self.ai.pending.is_some() {
             return false;
         }
+        let activity = pending.activity();
         match self.ai.session.request(request) {
             Ok(id) => {
                 self.ai.pending = Some((id, pending));
                 self.ai.streaming.clear();
-                self.ai.status = None;
+                self.ai.messages.remove(&activity);
                 cx.notify();
                 true
             }
             Err(error) => {
-                self.ai.status = Some(error.to_string());
+                self.ai.messages.insert(activity, error.to_string());
                 cx.notify();
                 false
             }
@@ -321,7 +403,9 @@ impl ProjectView {
             match event {
                 AiEvent::LoginUrl(url) => self.ai.login = Some(url),
                 AiEvent::ConnectionError(error) => {
-                    self.ai.status = Some(error.to_string());
+                    self.ai
+                        .messages
+                        .insert(Activity::Connection, error.to_string());
                     self.ai.login = None;
                 }
                 AiEvent::Delta { request_id, text } => {
@@ -359,13 +443,14 @@ impl ProjectView {
                     {
                         self.ai.streaming.clear();
                         let pending = self.ai.pending.take().map(|(_, pending)| pending);
-                        self.ai.status = Some(error.to_string());
-                        if matches!(
-                            pending,
-                            Some(Pending::Research(_) | Pending::ResearchSummary(_))
-                        ) && !self.ai.answers.is_empty()
-                        {
-                            self.ai.status = Some(format!("Recherche unvollständig. {error}"));
+                        if let Some(activity) = pending.as_ref().map(Pending::activity) {
+                            let message =
+                                if activity == Activity::Research && !self.ai.answers.is_empty() {
+                                    format!("Recherche unvollständig. {error}")
+                                } else {
+                                    error.to_string()
+                                };
+                            self.ai.messages.insert(activity, message);
                         }
                         if matches!(error, writer::ai::AiError::ThreadUnavailable)
                             && let Some(Pending::Brainstorm {
@@ -422,7 +507,11 @@ impl ProjectView {
                 {
                     match chat.record_reply(text, thread_id) {
                         Ok(id) => self.open_chat_message(id, window, cx),
-                        Err(error) => self.ai.status = Some(error.to_string()),
+                        Err(error) => {
+                            self.ai
+                                .messages
+                                .insert(Activity::Brainstorm, error.to_string());
+                        }
                     }
                 }
             }
@@ -467,9 +556,11 @@ impl ProjectView {
                 let answers = self.verified_answers(&text, &citations);
                 if let Some(answers) = answers.filter(|items| !items.is_empty()) {
                     self.ai.answers = answers;
-                    self.ai.status = Some("Recherche abgeschlossen.".into());
+                    self.ai
+                        .messages
+                        .insert(Activity::Research, "Recherche abgeschlossen.".into());
                 } else {
-                    self.ai.status = Some("Die Zusammenfassung ließ sich nicht belegen. Die geprüften Einzelantworten sind unten aufgeführt.".into());
+                    self.ai.messages.insert(Activity::Research, "Die Zusammenfassung ließ sich nicht belegen. Die geprüften Einzelantworten sind unten aufgeführt.".into());
                 }
             }
             Pending::Consistency(run) => self.continue_consistency(run, &text, cx),
@@ -538,7 +629,9 @@ impl ProjectView {
         }
         self.ai.clear_brainstorm();
         if let Err(error) = self.refresh_project() {
-            self.ai.status = Some(error.to_string());
+            self.ai
+                .messages
+                .insert(Activity::Brainstorm, error.to_string());
             cx.notify();
             return;
         }
@@ -546,18 +639,22 @@ impl ProjectView {
         match Brainstorm::open(project, pair) {
             Ok(chat) => {
                 self.ai.brainstorm = Some(chat);
-                self.ai.status = None;
+                self.ai.messages.remove(&Activity::Brainstorm);
             }
-            Err(error) => self.ai.status = Some(error.to_string()),
+            Err(error) => {
+                self.ai
+                    .messages
+                    .insert(Activity::Brainstorm, error.to_string());
+            }
         }
         cx.notify();
     }
 
-    fn send_chat(&mut self, cx: &mut Context<Self>) {
+    fn send_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.ai.pending.is_some() {
             return;
         }
-        let prompt = self.input_prompt(cx);
+        let prompt = self.ai.brainstorm_input.read(cx).value().trim().to_owned();
         if prompt.is_empty() {
             return;
         }
@@ -572,10 +669,16 @@ impl ProjectView {
         let request = chat.request(&prompt);
         match chat.append(Role::Author, &prompt) {
             Ok(_) => {
-                self.request_ai(request, pending, cx);
+                if self.request_ai(request, pending, cx) {
+                    self.ai.brainstorm_input.update(cx, |input, cx| {
+                        input.set_value("", window, cx);
+                    });
+                }
             }
             Err(error) => {
-                self.ai.status = Some(error.to_string());
+                self.ai
+                    .messages
+                    .insert(Activity::Brainstorm, error.to_string());
                 cx.notify();
             }
         }
@@ -605,7 +708,11 @@ impl ProjectView {
         let range = self.ai.answer.read(cx).selected_range();
         match chat.mark(message, range) {
             Ok(id) => self.ai.idea = Some(id),
-            Err(error) => self.ai.status = Some(error.to_string()),
+            Err(error) => {
+                self.ai
+                    .messages
+                    .insert(Activity::Brainstorm, error.to_string());
+            }
         }
         cx.notify();
     }
@@ -641,13 +748,17 @@ impl ProjectView {
                     self.select_event(id, window, cx);
                 }
             }
-            Err(error) => self.ai.status = Some(error.to_string()),
+            Err(error) => {
+                self.ai
+                    .messages
+                    .insert(Activity::Brainstorm, error.to_string());
+            }
         }
         cx.notify();
     }
 
     fn ask_research(&mut self, cx: &mut Context<Self>) {
-        let question = self.input_prompt(cx);
+        let question = self.ai.research_input.read(cx).value().trim().to_owned();
         if question.is_empty() || self.ai.pending.is_some() || !self.flush(cx) {
             return;
         }
@@ -658,7 +769,10 @@ impl ProjectView {
         let Some(project) = &self.project else { return };
         let mut all = VecDeque::from(citation_batches(project));
         let Some(current) = all.pop_front() else {
-            self.ai.status = Some("Das Buch enthält noch keine Quellen.".into());
+            self.ai.messages.insert(
+                Activity::Research,
+                "Das Buch enthält noch keine Quellen.".into(),
+            );
             cx.notify();
             return;
         };
@@ -676,7 +790,8 @@ impl ProjectView {
     fn continue_research(&mut self, mut run: ResearchRun, text: &str, cx: &mut Context<Self>) {
         let Some(project) = &self.project else { return };
         let Some(answers) = self.verified_answers(text, &run.current) else {
-            self.ai.status = Some(
+            self.ai.messages.insert(
+                Activity::Research,
                 "Recherche unvollständig. Codex hat keine prüfbaren Quellenangaben geliefert."
                     .into(),
             );
@@ -712,10 +827,11 @@ impl ProjectView {
                 );
                 return;
             }
-            self.ai.status = Some("Die belegten Einzelergebnisse überschreiten den Kontextrahmen für eine gemeinsame Antwort.".into());
+            self.ai.messages.insert(Activity::Research, "Die belegten Einzelergebnisse überschreiten den Kontextrahmen für eine gemeinsame Antwort.".into());
             return;
         }
-        self.ai.status = Some(
+        self.ai.messages.insert(
+            Activity::Research,
             if self.ai.answers.is_empty() {
                 "Keine belegte Antwort gefunden."
             } else {
@@ -789,9 +905,16 @@ impl ProjectView {
         }
         batches.extend(meta.chunks(3).map(<[Citation]>::to_vec));
         let Some(current) = batches.first().cloned() else {
+            self.ai.messages.insert(
+                Activity::Consistency,
+                "Das Buch enthält noch keine prüfbaren Aussagen.".into(),
+            );
+            cx.notify();
             return;
         };
         self.ai.findings.clear();
+        self.ai.selected_finding = None;
+        self.ai.explaining_finding = None;
         let run = ConsistencyRun {
             batches,
             left: 0,
@@ -811,7 +934,8 @@ impl ProjectView {
         let sources = Sources::build(project);
         let review = Review::from_project(project);
         let Some(findings) = read_model::<Vec<ModelFinding>>(text) else {
-            self.ai.status = Some(
+            self.ai.messages.insert(
+                Activity::Consistency,
                 "Konsistenzprüfung unvollständig. Die Fundstellen konnten nicht gelesen werden."
                     .into(),
             );
@@ -850,7 +974,8 @@ impl ProjectView {
         if run.advance() {
             self.request_ai(consistency_request(&run), Pending::Consistency(run), cx);
         } else {
-            self.ai.status = Some(
+            self.ai.messages.insert(
+                Activity::Consistency,
                 if self.ai.findings.is_empty() {
                     "Keinen belegten Widerspruch gefunden."
                 } else {
@@ -871,12 +996,20 @@ impl ProjectView {
         let Some((project, store)) = self.project.as_ref().zip(self.store.as_mut()) else {
             return;
         };
-        let reason = self.ai.note.read(cx).value().trim().to_owned();
+        let reason = self
+            .ai
+            .consistency_reason
+            .read(cx)
+            .value()
+            .trim()
+            .to_owned();
         let result = Review::from_project(project)
             .dismiss(finding, (!reason.is_empty()).then_some(reason), store)
             .map(|_| ());
-        if self.report(result, cx) {
-            self.flush(cx);
+        if self.report(result, cx) && self.flush(cx) {
+            self.ai.selected_finding = None;
+            self.ai.explaining_finding = None;
+            cx.notify();
         }
     }
 
@@ -966,7 +1099,10 @@ impl ProjectView {
             Sources::build(project).resolve(&suggestion.source),
             Resolution::Unique { .. }
         ) {
-            self.ai.status = Some("Die belegende Textstelle wurde geändert.".into());
+            self.ai.messages.insert(
+                Activity::Scene,
+                "Die belegende Textstelle wurde geändert.".into(),
+            );
             cx.notify();
             return;
         }
@@ -1004,7 +1140,10 @@ impl ProjectView {
                 .filter(|anchor| !anchor.quote().trim().is_empty())
         };
         let Some(anchor) = anchor else {
-            self.ai.status = Some("Markiere die auszuformulierenden Stichpunkte.".into());
+            self.ai.messages.insert(
+                Activity::Scene,
+                "Markiere die auszuformulierenden Stichpunkte.".into(),
+            );
             cx.notify();
             return;
         };
@@ -1092,7 +1231,7 @@ impl ProjectView {
                 self.stage_editor(window, cx);
             }
             Err(error) => {
-                self.ai.status = Some(error.to_string());
+                self.ai.messages.insert(Activity::Scene, error.to_string());
                 cx.notify();
             }
         }
@@ -1277,6 +1416,45 @@ fn scope_label(scope: TemporalScope) -> &'static str {
     }
 }
 
+fn setting_value(label: &'static str, value: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .gap_1()
+        .child(div().font_medium().child(label))
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(value.into()),
+        )
+}
+
+fn brainstorm_event(event: &Event, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .border_1()
+        .border_color(cx.theme().border)
+        .rounded(cx.theme().radius)
+        .bg(cx.theme().muted)
+        .p_3()
+        .child(div().font_semibold().child(event.title.clone()))
+        .when_some(event.time.clone(), |card, time| {
+            card.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(time),
+            )
+        })
+        .when(!event.body.trim().is_empty(), |card| {
+            card.child(truncate(event.body.trim(), 240).to_owned())
+        })
+}
+
 impl ProjectView {
     fn request_button(&self, button: Button) -> Button {
         button.disabled(
@@ -1284,7 +1462,81 @@ impl ProjectView {
         )
     }
 
-    pub(super) fn assistance_view(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+    pub(super) fn settings_page(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+        let saving = self.store.as_ref().is_some_and(Store::is_pending);
+        let conflict = self.store.as_ref().and_then(Store::conflict).is_some();
+        let files = if conflict {
+            "Dateikonflikt"
+        } else if saving {
+            "Dateiänderungen ausstehend"
+        } else {
+            "Auf Festplatte gesichert"
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .max_w(rems(48.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(div().text_xl().font_semibold().child("Projekteinstellungen"))
+                    .child(
+                        Button::new("close-settings").ghost().label("Schließen").on_click(
+                            cx.listener(|view, _, window, cx| {
+                                view.close_project_settings(window, cx);
+                            }),
+                        ),
+                    ),
+            )
+            .child(
+                div().flex().flex_col().gap_3()
+                    .child(div().text_lg().font_semibold().child("KI-Unterstützung"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(setting_value("KI für dieses Projekt", "Mit ChatGPT über Codex verbinden", cx))
+                            .child(
+                                Switch::new("enable-codex")
+                                    .accessibility_label("KI für dieses Projekt")
+                                    .checked(self.ai.enabled)
+                                    .on_change(cx.listener(|view, enabled, window, cx| {
+                                        view.set_ai(*enabled, window, cx);
+                                    })),
+                            ),
+                    )
+                    .child(self.connection_settings(cx))
+                    .child(
+                        div().text_sm().text_color(cx.theme().muted_foreground)
+                            .child("Beim Verlassen einer geänderten Szene kann die App Detailvorschläge anfordern."),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .pt_4()
+                    .child(div().text_lg().font_semibold().child("Projektdateien und Versionen"))
+                    .child(setting_value("Projektordner", project.root().display().to_string(), cx))
+                    .child(setting_value("Automatische Dateisicherung", files, cx))
+                    .child(setting_value(
+                        "Letzte lokale Git-Version",
+                        self.last_version.as_deref().unwrap_or("Keine Version angezeigt"),
+                        cx,
+                    )),
+            )
+    }
+
+    fn connection_settings(&self, cx: &mut Context<Self>) -> Div {
         let status = match self.ai.session.status() {
             AiStatus::Disabled => "Aus".to_owned(),
             AiStatus::Connecting => "Codex verbindet sich …".into(),
@@ -1293,24 +1545,16 @@ impl ProjectView {
             AiStatus::Ready => "Mit ChatGPT verbunden".into(),
             AiStatus::Unavailable(error) => error.to_string(),
         };
-        let mut view = div()
+        div()
             .flex()
             .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("Codex für dieses Projekt"))
-            .child(status)
+            .items_start()
+            .gap_2()
             .child(
-                Button::new("enable-codex")
-                    .label(if self.ai.enabled {
-                        "KI ausschalten"
-                    } else {
-                        "KI einschalten"
-                    })
-                    .on_click(
-                        cx.listener(|view, _, window, cx| {
-                            view.set_ai(!view.ai.enabled, window, cx)
-                        }),
-                    ),
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(status.clone()),
             )
             .when(self.ai.enabled, |panel| {
                 panel.child(
@@ -1343,8 +1587,12 @@ impl ProjectView {
                             .primary()
                             .label("Mit ChatGPT verbinden")
                             .on_click(cx.listener(|view, _, _, cx| {
-                                view.ai.status =
-                                    view.ai.session.login().err().map(|error| error.to_string());
+                                view.ai.messages.remove(&Activity::Connection);
+                                if let Err(error) = view.ai.session.login() {
+                                    view.ai
+                                        .messages
+                                        .insert(Activity::Connection, error.to_string());
+                                }
                                 cx.notify();
                             })),
                     )
@@ -1357,12 +1605,12 @@ impl ProjectView {
                         Button::new("cancel-login")
                             .label("Anmeldung abbrechen")
                             .on_click(cx.listener(|view, _, _, cx| {
-                                view.ai.status = view
-                                    .ai
-                                    .session
-                                    .cancel_login()
-                                    .err()
-                                    .map(|error| error.to_string());
+                                view.ai.messages.remove(&Activity::Connection);
+                                if let Err(error) = view.ai.session.cancel_login() {
+                                    view.ai
+                                        .messages
+                                        .insert(Activity::Connection, error.to_string());
+                                }
                                 view.ai.login = None;
                                 cx.notify();
                             })),
@@ -1377,44 +1625,91 @@ impl ProjectView {
                         .on_click(move |_, _, cx| cx.open_url(&url)),
                 )
             })
-            .child(self.ai_activity(cx))
-            .child("Frage, Gesprächsbeitrag oder Anweisung")
-            .child(Textarea::new(&self.ai.input))
-            .child(self.research_view(project, cx))
-            .child(self.brainstorm_view(project, cx))
-            .child(self.consistency_view(project, cx));
-        if let Some(draft) = &self.ai.draft {
-            view = view
-                .child(div().text_lg().child("Entwurf aus der Szenenansicht"))
-                .child(draft.text().to_owned());
-        }
-        view
+            .when_some(
+                self.ai
+                    .messages
+                    .get(&Activity::Connection)
+                    .filter(|message| **message != status),
+                |panel, message| panel.child(div().text_sm().child(message.clone())),
+            )
     }
 
-    fn ai_activity(&self, cx: &mut Context<Self>) -> Div {
+    fn ai_setup_action(&self, cx: &mut Context<Self>) -> Option<Button> {
+        if matches!(self.ai.session.status(), AiStatus::Ready) {
+            return None;
+        }
+        Some(
+            Button::new("ai-settings")
+                .outline()
+                .label(if self.ai.enabled {
+                    "KI-Verbindung einrichten …"
+                } else {
+                    "KI einschalten …"
+                })
+                .on_click(
+                    cx.listener(|view, _, window, cx| view.open_project_settings(window, cx)),
+                ),
+        )
+    }
+
+    pub(super) fn research_page(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child("Frage zur Geschichte"),
+            )
+            .child(Textarea::new(&self.ai.research_input).aria_label("Frage zur Geschichte"))
+            .children(self.ai_setup_action(cx))
+            .child(self.ai_activity(Activity::Research, cx))
+            .child(self.research_view(project, cx))
+    }
+
+    fn ai_activity(&self, activity: Activity, cx: &mut Context<Self>) -> Div {
+        let running = self
+            .ai
+            .pending
+            .as_ref()
+            .map(|(_, pending)| pending.activity());
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .when_some(self.ai.status.clone(), |panel, message| {
-                panel.child(message)
+            .when_some(self.ai.messages.get(&activity), |panel, message| {
+                panel.child(message.clone())
             })
-            .when(self.ai.pending.is_some(), |panel| {
+            .when(
+                running.is_some_and(|running| running != activity),
+                |panel| {
+                    panel.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Eine andere KI-Anfrage läuft."),
+                    )
+                },
+            )
+            .when(running == Some(activity), |panel| {
                 panel.child(
                     Button::new("interrupt")
                         .label("Anfrage abbrechen")
-                        .on_click(cx.listener(|view, _, _, cx| {
+                        .on_click(cx.listener(move |view, _, _, cx| {
                             if let Err(error) = view.ai.session.interrupt() {
-                                view.ai.status = Some(error.to_string());
+                                view.ai.messages.insert(activity, error.to_string());
                             }
                             view.ai.delayed_details.clear();
                             cx.notify();
                         })),
                 )
             })
-            .when(!self.ai.streaming.is_empty(), |panel| {
-                panel.child(self.ai.streaming.clone())
-            })
+            .when(
+                running == Some(activity) && !self.ai.streaming.is_empty(),
+                |panel| panel.child(self.ai.streaming.clone()),
+            )
     }
 
     fn research_view(&self, project: &Project, cx: &mut Context<Self>) -> Div {
@@ -1428,7 +1723,6 @@ impl ProjectView {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_lg().child("Frage zur Geschichte"))
             .child(format!("Zeitbezug · {event}"))
             .child(
                 div()
@@ -1476,60 +1770,34 @@ impl ProjectView {
             }))
     }
 
-    fn brainstorm_view(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+    pub(super) fn wide_brainstorm(window: &Window) -> bool {
+        window.viewport_size().width >= window.rem_size() * 64.
+    }
+
+    pub(super) fn assistance_view(
+        &self,
+        project: &Project,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let timeline = Timeline::from_project(project);
-        let mut panel = div()
+        let first = self.ai.pair_seed.and_then(|id| timeline.event(id));
+        let second = self.ai.brainstorm.as_ref().and_then(|chat| {
+            chat.pair()
+                .into_iter()
+                .find(|id| Some(*id) != self.ai.pair_seed)
+                .and_then(|id| timeline.event(id))
+        });
+        let mut conversation = div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(div().text_lg().child("Brainstorming am Ereignispaar"))
-            .child(
-                if let Some(title) = self
-                    .ai
-                    .pair_seed
-                    .and_then(|id| timeline.event(id))
-                    .map(|event| event.title.as_str())
-                {
-                    format!("Erstes Ereignis · {title}")
-                } else {
-                    "Erstes Ereignis auswählen".into()
-                },
-            )
-            .child(div().flex().flex_wrap().gap_2().children(
-                timeline.ordered_events().into_iter().map(|event| {
-                    let id = event.id;
-                    Button::new(format!("brainstorm-first-{id}"))
-                        .label(event.title.clone())
-                        .disabled(self.ai.pending.is_some())
-                        .when(self.ai.pair_seed == Some(id), |button| button.primary())
-                        .on_click(cx.listener(move |view, _, _, cx| view.select_pair_seed(id, cx)))
-                }),
-            ))
-            .when_some(self.ai.pair_seed, |panel, seed| {
-                panel.child("Zweites Ereignis").child(
-                    div().flex().flex_wrap().gap_2().children(
-                        timeline
-                            .ordered_events()
-                            .into_iter()
-                            .filter(|event| event.id != seed)
-                            .map(|event| {
-                                let id = event.id;
-                                Button::new(format!("brainstorm-second-{id}"))
-                                    .label(event.title.clone())
-                                    .disabled(self.ai.pending.is_some())
-                                    .on_click(
-                                        cx.listener(move |view, _, _, cx| view.open_pair(id, cx)),
-                                    )
-                            }),
-                    ),
-                )
-            });
+            .flex_1()
+            .min_w_64()
+            .gap_3()
+            .child(div().text_lg().font_semibold().child("Gespräch"))
+            .child(self.ai_activity(Activity::Brainstorm, cx));
         if let Some(chat) = &self.ai.brainstorm {
-            panel = panel
-                .child(
-                    self.request_button(Button::new("send-chat").primary().label("Beitrag senden"))
-                        .on_click(cx.listener(|view, _, _, cx| view.send_chat(cx))),
-                )
+            conversation = conversation
                 .children(chat.messages().iter().map(|message| {
                     let id = message.id;
                     let role = match message.role {
@@ -1540,11 +1808,20 @@ impl ProjectView {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().child(role))
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(role),
+                        )
                         .child(message.text.clone())
                         .when(message.role == Role::Codex, |row| {
                             row.child(
                                 Button::new(format!("message-{id}"))
+                                    .ghost()
                                     .label("Textstelle auswählen")
                                     .on_click(cx.listener(move |view, _, window, cx| {
                                         view.open_chat_message(id, window, cx)
@@ -1554,7 +1831,11 @@ impl ProjectView {
                 }))
                 .when(self.ai.brainstorm_message.is_some(), |panel| {
                     panel
-                        .child(Textarea::new(&self.ai.answer).readonly(true))
+                        .child(
+                            Textarea::new(&self.ai.answer)
+                                .readonly(true)
+                                .aria_label("Antwort von Codex"),
+                        )
                         .child(
                             Button::new("mark-idea")
                                 .label("Auswahl als Idee markieren")
@@ -1575,20 +1856,180 @@ impl ProjectView {
                             cx.notify();
                         }))
                 }))
-                .when(self.ai.idea.is_some(), |panel| {
-                    panel.child(self.promote_view(&timeline, cx))
-                });
+                .when_some(
+                    self.ai
+                        .idea
+                        .and_then(|id| chat.ideas().iter().find(|idea| idea.id == id)),
+                    |panel, idea| panel.child(self.promote_view(&timeline, &idea.quote, cx)),
+                )
+                .child(Textarea::new(&self.ai.brainstorm_input).aria_label("Gesprächsbeitrag"))
+                .child(
+                    self.request_button(Button::new("send-chat").primary().label("Beitrag senden"))
+                        .on_click(cx.listener(|view, _, window, cx| view.send_chat(window, cx))),
+                );
+        } else {
+            conversation = conversation.child(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Wähle zwei Ereignisse für das Gespräch."),
+            );
         }
-        panel
+        let events = self.brainstorm_events(&timeline, first, second, cx);
+        let conversation = conversation.children(self.ai_setup_action(cx));
+        let wide = Self::wide_brainstorm(window)
+            && self
+                .store
+                .as_ref()
+                .is_none_or(|store| store.conflict().is_none());
+        let workspace = div().flex().min_w_0();
+        let workspace = if wide {
+            workspace.flex_1().min_h_0().child(
+                h_resizable("brainstorm-split")
+                    .child(
+                        resizable_panel()
+                            .size(window.rem_size() * 23.)
+                            .size_range(window.rem_size() * 17. ..window.rem_size() * 40.)
+                            .child(
+                                events
+                                    .pr_4()
+                                    .min_h_0()
+                                    .overflow_y_scrollbar()
+                                    .id("brainstorm-events"),
+                            ),
+                    )
+                    .child(
+                        resizable_panel().child(
+                            conversation
+                                .pl_4()
+                                .min_h_0()
+                                .overflow_y_scrollbar()
+                                .id("brainstorm-conversation"),
+                        ),
+                    ),
+            )
+        } else {
+            workspace
+                .flex_col()
+                .gap_5()
+                .child(events)
+                .child(conversation)
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .when(wide, |layout| layout.flex_1().min_h_0())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(div().text_xl().font_semibold().child("Lücke erkunden"))
+                    .child(
+                        Button::new("back-to-timeline")
+                            .ghost()
+                            .label("Zur Timeline")
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                view.navigate(Page::Timeline, window, cx)
+                            })),
+                    ),
+            )
+            .child(workspace)
     }
 
-    fn promote_view(&self, timeline: &Timeline, cx: &mut Context<Self>) -> Div {
+    fn brainstorm_events(
+        &self,
+        timeline: &Timeline,
+        first: Option<&Event>,
+        second: Option<&Event>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut events = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_64()
+            .gap_3()
+            .child(div().text_lg().font_semibold().child("Ereignispaar"));
+        if let Some((first, second)) = first.zip(second) {
+            let (earlier, relation, later) = match timeline.compare(first.id, second.id) {
+                TemporalOrder::Before => (first, "↓ Zeitlich davor", second),
+                TemporalOrder::After => (second, "↓ Zeitlich davor", first),
+                _ => (first, "Zeitliche Reihenfolge offen", second),
+            };
+            events = events
+                .child(brainstorm_event(earlier, cx))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(relation),
+                )
+                .child(brainstorm_event(later, cx));
+        } else if let Some(first) = first {
+            events = events.child(brainstorm_event(first, cx));
+        }
+        let options = timeline.ordered_events();
+        events
+            .child(div().font_medium().child("Erstes Ereignis"))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(options.iter().map(|event| {
+                        let id = event.id;
+                        Button::new(format!("brainstorm-first-{id}"))
+                            .ghost()
+                            .label(event.title.clone())
+                            .disabled(self.ai.pending.is_some())
+                            .when(first.is_some_and(|event| event.id == id), |button| {
+                                button.primary()
+                            })
+                            .on_click(
+                                cx.listener(move |view, _, _, cx| view.select_pair_seed(id, cx)),
+                            )
+                    })),
+            )
+            .when_some(first, |events, first| {
+                events
+                    .child(div().font_medium().child("Zweites Ereignis"))
+                    .child(
+                        div().flex().flex_wrap().gap_1().children(
+                            options
+                                .into_iter()
+                                .filter(|event| event.id != first.id)
+                                .map(|event| {
+                                    let id = event.id;
+                                    Button::new(format!("brainstorm-second-{id}"))
+                                        .ghost()
+                                        .label(event.title.clone())
+                                        .disabled(self.ai.pending.is_some())
+                                        .when(
+                                            second.is_some_and(|event| event.id == id),
+                                            |button| button.primary(),
+                                        )
+                                        .on_click(
+                                            cx.listener(move |view, _, _, cx| {
+                                                view.open_pair(id, cx)
+                                            }),
+                                        )
+                                }),
+                        ),
+                    )
+            })
+    }
+
+    fn promote_view(&self, timeline: &Timeline, quote: &str, cx: &mut Context<Self>) -> Div {
         div()
             .flex()
             .flex_col()
             .gap_2()
+            .child(div().text_lg().font_semibold().child("Idee übernehmen"))
+            .child(quote.to_owned())
             .child("Titel des neuen Ereignisses")
-            .child(Input::new(&self.ai.note))
+            .child(Input::new(&self.ai.note).aria_label("Titel des neuen Ereignisses"))
             .child("Verbindungen für die Übernahme")
             .children(timeline.ordered_events().into_iter().map(|event| {
                 let id = event.id;
@@ -1654,77 +2095,338 @@ impl ProjectView {
             )
     }
 
-    fn consistency_view(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+    pub(super) fn consistency_page(&self, project: &Project, cx: &mut Context<Self>) -> Div {
         let review = Review::from_project(project);
+        let findings: Vec<_> = self
+            .ai
+            .findings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, finding)| {
+                let status = review.status(finding);
+                (status != ReviewStatus::Dismissed).then_some((index, finding, status))
+            })
+            .collect();
+        let decision = match self.ai.selected_finding {
+            Some(FindingSelection::Marked(id)) if self.ai.show_decisions => {
+                review.decisions().iter().find(|decision| decision.id == id)
+            }
+            _ => None,
+        };
+        let selected = match self.ai.selected_finding {
+            Some(FindingSelection::Open(index)) => findings.iter().find(|(i, _, _)| *i == index),
+            _ => None,
+        }
+        .or_else(|| findings.first())
+        .filter(|_| decision.is_none());
+        let list = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_48()
+            .gap_2()
+            .child(div().text_lg().font_semibold().child("Offene Prüffunde"))
+            .when(findings.is_empty(), |list| {
+                list.child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Keine offenen Prüffunde."),
+                )
+            })
+            .children(findings.iter().map(|&(index, finding, _)| {
+                let key = FindingSelection::Open(index);
+                Button::new(("finding", index))
+                    .ghost()
+                    .label(finding.title.clone())
+                    .when(
+                        selected.is_some_and(|(current, _, _)| *current == index),
+                        |button| button.primary(),
+                    )
+                    .on_click(cx.listener(move |view, _, _, cx| view.select_finding(key, cx)))
+            }))
+            .child(
+                Button::new("marked-findings")
+                    .outline()
+                    .label(if self.ai.show_decisions {
+                        "Vermerkte ausblenden"
+                    } else {
+                        "Vermerkte anzeigen"
+                    })
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.ai.show_decisions = !view.ai.show_decisions;
+                        if !view.ai.show_decisions
+                            && matches!(view.ai.selected_finding, Some(FindingSelection::Marked(_)))
+                        {
+                            view.ai.selected_finding = None;
+                        }
+                        cx.notify();
+                    })),
+            )
+            .when(self.ai.show_decisions, |list| {
+                list.when(review.decisions().is_empty(), |list| {
+                    list.child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Keine vermerkten Prüffunde."),
+                    )
+                })
+                .children(review.decisions().iter().map(|decision| {
+                    let id = decision.id;
+                    Button::new(format!("decision-{id}"))
+                        .ghost()
+                        .label(decision.title.clone())
+                        .when(
+                            self.ai.selected_finding == Some(FindingSelection::Marked(id)),
+                            |button| button.primary(),
+                        )
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.select_finding(FindingSelection::Marked(id), cx);
+                        }))
+                }))
+            });
+
+        let details = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .min_w_64()
+            .flex_grow_1()
+            .flex_basis(rems(22.))
+            .children(selected.map(|&(index, finding, status)| {
+                self.finding_detail(project, &review, index, finding, status, cx)
+            }))
+            .when_some(decision, |pane, decision| {
+                pane.child(
+                    div()
+                        .text_lg()
+                        .font_semibold()
+                        .child(decision.title.clone()),
+                )
+                .children(decision.sources.iter().enumerate().map(|(index, source)| {
+                    self.consistency_source(project, &review, 10_000 + index, source, cx)
+                }))
+                .child(setting_value(
+                    "Als beabsichtigt vermerkt",
+                    decision
+                        .reason
+                        .as_deref()
+                        .unwrap_or("Keine Begründung angegeben")
+                        .to_owned(),
+                    cx,
+                ))
+            });
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(div().text_lg().child("Konsistenz"))
+            .gap_4()
             .child(
-                self.request_button(Button::new("check-consistency").label("Konsistenz prüfen"))
-                    .on_click(cx.listener(|view, _, _, cx| view.start_consistency(cx))),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(div().text_xl().font_semibold().child("Konsistenzprüfung"))
+                    .child(
+                        self.request_button(
+                            Button::new("check-consistency")
+                                .primary()
+                                .label("Konsistenz prüfen"),
+                        )
+                        .on_click(cx.listener(|view, _, _, cx| view.start_consistency(cx))),
+                    ),
             )
-            .when(!self.ai.findings.is_empty(), |panel| {
-                panel
-                    .child("Begründung für eine Entscheidung (optional)")
-                    .child(Input::new(&self.ai.note))
+            .children(self.ai_setup_action(cx))
+            .child(self.ai_activity(Activity::Consistency, cx))
+            .child(div().flex().flex_wrap().gap_6().child(list).child(details))
+    }
+
+    fn select_finding(&mut self, selection: FindingSelection, cx: &mut Context<Self>) {
+        self.ai.selected_finding = Some(selection);
+        self.ai.explaining_finding = None;
+        cx.notify();
+    }
+
+    fn finding_detail(
+        &self,
+        project: &Project,
+        review: &Review,
+        index: usize,
+        finding: &Finding,
+        status: ReviewStatus,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_lg().font_semibold().child(finding.title.clone()))
+            .children(finding.sources.iter().enumerate().map(|(i, source)| {
+                self.consistency_source(project, review, 10_000 + index * 8 + i, source, cx)
+            }))
+            .when(status == ReviewStatus::Uncertain, |pane| {
+                pane.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Die Aussagen lassen sich ihren Fundstellen nicht eindeutig zuordnen.",
+                        ),
+                )
             })
-            .children(
-                self.ai
-                    .findings
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, finding)| {
-                        let status = review.status(finding);
-                        if status == ReviewStatus::Dismissed {
-                            return None;
-                        }
-                        Some(
+            .when(status == ReviewStatus::Open, |pane| {
+                if self.ai.explaining_finding == Some(index) {
+                    pane.child("Begründung (optional)")
+                        .child(
+                            Input::new(&self.ai.consistency_reason)
+                                .aria_label("Begründung (optional)"),
+                        )
+                        .child(
                             div()
                                 .flex()
-                                .flex_col()
                                 .gap_2()
-                                .child(finding.title.clone())
-                                .children(finding.sources.iter().enumerate().filter_map(
-                                    |(i, source)| {
-                                        let document = project.document(source.document)?;
-                                        let scene = SceneText::from_markdown(
-                                            document.id(),
-                                            document.body(),
-                                        );
-                                        let anchor = unique_quote(scene.text(), &source.quote)
-                                            .and_then(|range| scene.anchor(range).ok());
-                                        Some(match anchor {
-                                            Some(anchor) => div().child(self.source_button(
-                                                10_000 + index * 8 + i,
-                                                document.title(),
-                                                &anchor,
-                                                cx,
-                                            )),
-                                            None => div().child(format!(
-                                                "{} · {}",
-                                                document.title(),
-                                                source.quote
-                                            )),
-                                        })
-                                    },
+                                .justify_end()
+                                .child(Button::new("cancel-reason").label("Abbrechen").on_click(
+                                    cx.listener(|view, _, _, cx| {
+                                        view.ai.explaining_finding = None;
+                                        cx.notify();
+                                    }),
                                 ))
                                 .child(
                                     Button::new(("dismiss-finding", index))
-                                        .label(if status == ReviewStatus::Uncertain {
-                                            "Fundstellen erneut prüfen"
-                                        } else {
-                                            "Als beabsichtigt markieren"
-                                        })
-                                        .disabled(status == ReviewStatus::Uncertain)
+                                        .primary()
+                                        .label("Vermerken")
                                         .on_click(cx.listener(move |view, _, _, cx| {
-                                            view.dismiss_finding(index, cx)
+                                            view.dismiss_finding(index, cx);
                                         })),
                                 ),
                         )
-                    }),
+                } else {
+                    pane.child(
+                        Button::new("open-reason")
+                            .label("Als beabsichtigt markieren …")
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.ai.explaining_finding = Some(index);
+                                view.ai.consistency_reason.update(cx, |reason, cx| {
+                                    reason.set_value("", window, cx);
+                                    reason.focus(window, cx);
+                                });
+                                cx.notify();
+                            })),
+                    )
+                }
+            })
+    }
+
+    fn consistency_source(
+        &self,
+        project: &Project,
+        review: &Review,
+        index: usize,
+        source: &FindingSource,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let document = project.document(source.document);
+        let location = review.locate(source);
+        let scene =
+            document.map(|document| SceneText::from_markdown(document.id(), document.body()));
+        let quote_range = scene
+            .as_ref()
+            .and_then(|scene| unique_quote(scene.text(), &source.quote));
+        let category = match document.map(writer::Document::kind) {
+            Some(DocumentKind::Event) => "Timeline",
+            Some(DocumentKind::Chapter) => "Kapitel",
+            Some(DocumentKind::Scene)
+                if scene
+                    .as_ref()
+                    .zip(quote_range.as_ref())
+                    .is_some_and(|(scene, quote)| {
+                        scene.concepts().iter().any(|concept| {
+                            quote.start < concept.range.end && concept.range.start < quote.end
+                        })
+                    }) =>
+            {
+                "Manuskript · Konzept"
+            }
+            Some(DocumentKind::Scene) => "Manuskript",
+            Some(_) => "Welt",
+            None => "Fundstelle fehlt",
+        };
+        let mut pane = div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .pt_3()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(category),
             )
+            .child(source.quote.clone());
+        if let Some((document, location)) = document.zip(location) {
+            let mut title = document.title().to_owned();
+            if let SourceSection::RelationNote { to, .. } | SourceSection::RelationTime { to, .. } =
+                location.section
+                && let Some(target) = project.document(to)
+            {
+                title = format!("{title} → {}", target.title());
+            }
+            let id = document.id();
+            let kind = document.kind();
+            let section = location.section;
+            let anchor = quote_range
+                .or(location.body_range)
+                .and_then(|range| scene.as_ref()?.anchor(range).ok());
+            if section != SourceSection::Body || anchor.is_some() || kind == DocumentKind::Chapter {
+                pane = pane.child(
+                    Button::new(("source", index))
+                        .ghost()
+                        .label(title)
+                        .on_click(cx.listener(move |view, _, window, cx| match section {
+                            SourceSection::Body if kind == DocumentKind::Chapter => {
+                                view.navigate(Page::Outline, window, cx);
+                                if view.page == Page::Outline {
+                                    view.select_outline_chapter(id, window, cx);
+                                }
+                            }
+                            SourceSection::Body => {
+                                if let Some(anchor) = &anchor {
+                                    view.jump_to(anchor, window, cx);
+                                }
+                            }
+                            SourceSection::EventTime => {
+                                view.navigate(Page::Timeline, window, cx);
+                                if view.page == Page::Timeline {
+                                    view.select_event(id, window, cx);
+                                    view.event_time
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                }
+                            }
+                            SourceSection::RelationNote { to, relation }
+                            | SourceSection::RelationTime { to, relation } => {
+                                view.navigate(Page::Timeline, window, cx);
+                                if view.page == Page::Timeline {
+                                    view.select_relation(id, to, relation, window, cx);
+                                    let field = match section {
+                                        SourceSection::RelationNote { .. } => &view.relation_note,
+                                        _ => &view.relation_time,
+                                    };
+                                    field.update(cx, |input, cx| input.focus(window, cx));
+                                }
+                            }
+                        })),
+                );
+            } else {
+                pane = pane.child(div().text_sm().child(title));
+            }
+        } else if let Some(document) = document {
+            pane = pane.child(div().text_sm().child(document.title().to_owned()));
+        }
+        pane
     }
 
     fn save_draft_note(
@@ -1758,7 +2460,10 @@ impl ProjectView {
         );
         let result = knowledge.stage_changes(project, store);
         if self.report(result, cx) && self.flush(cx) {
-            self.ai.status = Some("Antwort in der Weltkartei gesichert.".into());
+            self.ai.messages.insert(
+                Activity::Scene,
+                "Antwort in der Weltkartei gesichert.".into(),
+            );
             cx.notify();
         }
     }
@@ -1814,7 +2519,7 @@ impl ProjectView {
                                         .scene(scene)
                                         .and_then(|scene| scene.event)
                                 });
-                                view.navigate(Page::Codex, window, cx);
+                                view.navigate(Page::Research, window, cx);
                             })),
                     )
                     .child(
@@ -1834,7 +2539,8 @@ impl ProjectView {
                         ),
                     ),
             )
-            .child(self.ai_activity(cx))
+            .children(self.ai_setup_action(cx))
+            .child(self.ai_activity(Activity::Scene, cx))
             .when_some(draft_here, |pane, _| {
                 pane.child("Entwurf")
                     .child(Textarea::new(&self.ai.answer).readonly(true))

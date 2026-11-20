@@ -1,9 +1,9 @@
 use super::{
-    AiPreferences, AiSession, AiStatus, Brainstorm, ConsistencyRun, Draft, Page, Pending, Project,
-    Relation, Review, Role, SceneText, Timeline, citation_batches,
+    AiPreferences, AiSession, AiStatus, Brainstorm, ConsistencyRun, Draft, Finding, FindingSource,
+    Page, Pending, Project, Relation, Review, Role, SceneText, Timeline, citation_batches,
     test_support::{self, TestWorkspace},
 };
-use gpui_kit::{App, AppContext, TestAppContext, Window, px, size, test::TestWindowExt};
+use gpui_kit::{App, AppContext, Focusable, TestAppContext, Window, px, size, test::TestWindowExt};
 use writer::{
     knowledge::{Knowledge, KnowledgeKind},
     storage::Store,
@@ -36,8 +36,8 @@ fn timeline_brainstorm_switches_to_the_selected_event_pair(cx: &mut TestAppConte
     let second = event("Aufbruch");
     let other = event("Fristablauf");
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx);
-        window.click(format!("brainstorm-first-{first}"), cx);
+        window.click(format!("event-{first}"), cx);
+        window.click("brainstorm-from-event", cx);
         window.click(format!("brainstorm-second-{second}"), cx);
     });
     let message = workspace.update(cx, |view, window, cx| {
@@ -104,8 +104,8 @@ fn brainstorm_promotes_only_the_selected_passage_with_the_chosen_link(cx: &mut T
     workspace.update(cx, |view, _, _| view.refresh_project().unwrap());
 
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx);
-        window.click(format!("brainstorm-first-{first}"), cx);
+        window.click(format!("event-{first}"), cx);
+        window.click("brainstorm-from-event", cx);
         assert!(
             window
                 .try_find(format!("brainstorm-second-{first}"))
@@ -209,7 +209,7 @@ fn scene_applies_only_the_marked_part_of_a_canned_draft(cx: &mut TestAppContext)
     });
     codex_window(cx, &workspace, |window, cx| {
         window.click("accept-draft", cx);
-        window.click(("page", 5_usize), cx);
+        window.click(("page", 0_usize), cx);
     });
 
     let project = Project::open(&workspace.root).unwrap();
@@ -255,16 +255,17 @@ fn research_only_shows_verified_citations_and_opens_the_chosen_passage(cx: &mut 
         );
         assert_eq!(view.ai.answers.len(), 1);
     });
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx);
+        window.click("ask-from-scene", cx);
         assert_eq!(
             window.find(("source", 0_usize)).label(),
-            Some("Das Signal · Konzept · zeitlich offen · Eine Tür öffnet sich.")
+            Some("Das Signal · Konzept · bis zum Bezugspunkt · Eine Tür öffnet sich.")
         );
         window.click(format!("research-at-{event}"), cx);
         assert_eq!(
             window.find(("source", 0_usize)).label(),
-            Some("Das Signal · Konzept · bis zum Bezugspunkt · Eine Tür öffnet sich.")
+            Some("Das Signal · Konzept · zeitlich offen · Eine Tür öffnet sich.")
         );
         assert!(window.try_find(("source", 1_000_usize)).is_none());
         window.click(("source", 0_usize), cx);
@@ -290,14 +291,17 @@ fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut 
     });
 
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx);
-        assert_eq!(window.find("enable-codex").label(), Some("KI einschalten"));
-        for action in ["ask", "check-consistency"] {
-            assert_eq!(window.find(action).disabled(), Some(true));
-            window.click(action, cx);
-        }
+        window.click(("page", 6_usize), cx);
+        assert_eq!(window.find("check-consistency").disabled(), Some(true));
+        assert!(window.try_find("enable-codex").is_none());
+        window.click("ai-settings", cx);
+        assert_eq!(window.find("enable-codex").checked(), Some(false));
+        assert_eq!(
+            window.find("enable-codex").label(),
+            Some("KI für dieses Projekt")
+        );
         window.click("enable-codex", cx);
-        assert_eq!(window.find("enable-codex").label(), Some("KI ausschalten"));
+        assert_eq!(window.find("enable-codex").checked(), Some(true));
         assert!(window.find("retry-connection").visible());
         assert!(window.try_find("login-browser").is_none());
     });
@@ -305,11 +309,12 @@ fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut 
 
     codex_window(cx, &workspace, |window, cx| {
         window.click("enable-codex", cx);
-        assert_eq!(window.find("enable-codex").label(), Some("KI einschalten"));
+        assert_eq!(window.find("enable-codex").checked(), Some(false));
         assert!(window.try_find("retry-connection").is_none());
-        for action in ["ask", "check-consistency"] {
-            assert_eq!(window.find(action).disabled(), Some(true));
-        }
+        window.click("close-settings", cx);
+        assert_eq!(window.find("check-consistency").disabled(), Some(true));
+        window.click(("page", 4_usize), cx);
+        assert_eq!(window.find("ask").disabled(), Some(true));
     });
     assert!(!preferences.is_enabled(&workspace.root, project_id).unwrap());
     workspace.update(cx, |view, _, _| {
@@ -419,14 +424,11 @@ fn consistency_review_saves_the_reason_and_hides_the_dismissed_finding(cx: &mut 
     });
     let reason = "Aus Absicht";
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx)
-    });
-    workspace.update(cx, |view, window, cx| {
-        view.ai.note.update(cx, |note, cx| note.focus(window, cx));
-    });
-    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 6_usize), cx);
         assert!(window.find(("source", 10_000_usize)).visible());
         assert!(window.find(("source", 10_001_usize)).visible());
+        assert!(window.try_find(("dismiss-finding", 0_usize)).is_none());
+        window.click("open-reason", cx);
         window.input(reason, cx);
         window.click(("dismiss-finding", 0_usize), cx);
         assert!(window.try_find(("dismiss-finding", 0_usize)).is_none());
@@ -435,7 +437,68 @@ fn consistency_review_saves_the_reason_and_hides_the_dismissed_finding(cx: &mut 
     let project = Project::open(&workspace.root).unwrap();
     let review = Review::from_project(&project);
     assert_eq!(review.decisions().len(), 1);
-    assert_eq!(review.decisions()[0].reason.as_deref(), Some(reason));
+    let decision = &review.decisions()[0];
+    assert_eq!(decision.reason.as_deref(), Some(reason));
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("marked-findings", cx);
+        let row = format!("decision-{}", decision.id);
+        assert!(window.find(row.clone()).visible());
+        window.click(row, cx);
+        assert!(window.find(("source", 10_000_usize)).visible());
+        assert!(window.try_find("open-reason").is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn consistency_source_opens_the_timeline_relationship(cx: &mut TestAppContext) {
+    let workspace = test_support::open(cx);
+    let project = Project::open(&workspace.root).unwrap();
+    let review = Review::from_project(&project);
+    let timeline_source = review
+        .metadata_sources()
+        .iter()
+        .find(|source| source.source.quote == "100 Jahre später")
+        .unwrap()
+        .source
+        .clone();
+    let event = timeline_source.document;
+    let target = Timeline::from_project(&project).relations()[0].to;
+    let scene = project
+        .scenes()
+        .find(|scene| scene.title() == "Das Signal")
+        .unwrap();
+    workspace.update(cx, |view, _, _| {
+        view.ai.findings.push(Finding {
+            title: "Dauer der Reise".into(),
+            sources: vec![
+                timeline_source,
+                FindingSource {
+                    document: scene.id(),
+                    quote: "Eine Tür öffnet sich.".into(),
+                },
+            ],
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 6_usize), cx);
+        assert_eq!(
+            window.find(("source", 10_000_usize)).label(),
+            Some("Erstkontakt → Aufbruch")
+        );
+        window.click(("source", 10_000_usize), cx);
+    });
+    workspace.update(cx, |view, window, cx| {
+        assert!(view.page == Page::Timeline);
+        assert_eq!(view.event, Some(event));
+        assert_eq!(view.event_target, Some(target));
+        assert_eq!(view.relation_time.read(cx).value(), "100 Jahre später");
+        assert!(
+            view.relation_time
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+    });
 }
 
 #[path = "../../tests/support/app_server.rs"]
@@ -484,7 +547,7 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
     }
 
     codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 5_usize), cx);
+        window.click(("page", 7_usize), cx);
         window.click("enable-codex", cx);
     });
     wait_for(cx, |cx| {
@@ -501,9 +564,11 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
 
     let prompt = "Was sieht die Figur? Der Leuchtturm ist dunkel.";
     codex_window(cx, &workspace, |window, cx| {
-        window.click(format!("brainstorm-first-{}", pair[0]), cx);
+        window.click("close-settings", cx);
+        window.click(format!("event-{}", pair[0]), cx);
+        window.click("brainstorm-from-event", cx);
         window.click(format!("brainstorm-second-{}", pair[1]), cx);
-        let id = workspace.view.read(cx).ai.input.entity_id();
+        let id = workspace.view.read(cx).ai.brainstorm_input.entity_id();
         window.click(("input", id), cx);
         window.input(prompt, cx);
         assert_ne!(window.find("send-chat").disabled(), Some(true));
@@ -544,7 +609,9 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
     assert_eq!(Timeline::from_project(&reopened).ordered_events().len(), 3);
 
     codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 7_usize), cx);
         window.click("enable-codex", cx);
+        window.click("close-settings", cx);
         assert_eq!(window.find("send-chat").disabled(), Some(true));
     });
     workspace.update(cx, |view, _, _| {
