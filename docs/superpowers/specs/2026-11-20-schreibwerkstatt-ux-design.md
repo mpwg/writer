@@ -1,16 +1,30 @@
 # UX-Entwurf für die Schreibwerkstatt
 
-Der [klickbare Prototyp](../../prototyp/index.html) zeigt alle neun Ansichten mit „Der Herr der Ringe“ als Beispielbuch. Öffne `docs/prototyp/index.html` aus dem ausgecheckten Repository direkt im Browser. **Ansicht** wechselt zwischen den Screens. Speichern, KI und Export zeigen Beispielzustände.
+Der [klickbare Prototyp](../../prototyp/index.html) zeigt das Desktop-Dokumentfenster mit „Der Herr der Ringe“ als Beispielbuch. Öffne `docs/prototyp/index.html` direkt im Browser. Der Umschalter **Prototyp-Ansicht** steht unter dem Fenster. Speichern, KI und Export zeigen Beispielzustände.
 
-Der Entwurf begleitet eine Autorin oder einen Autor vom ersten Ereignis bis zum exportierten Manuskript. Die Wireframes verwenden das Beispielbuch „Das verlorene Imperium“. Vorgeschlagen sind ein gemeinsames Desktopfenster, ein einblendbarer Kontextbereich und eine Schreibfläche in warmer Papierfarbe. [Freigegebene Produktspezifikation](2026-11-20-schreibprogramm-design.md) · [Umsetzungsplan](../plans/2026-11-20-schreibwerkstatt.md)
+Die Schreibwerkstatt ist eine native Rust-Desktop-Anwendung mit GPUI. Ein Buchprojekt öffnet sich als Dokumentfenster für Planung, Entwurf und Überarbeitung. Die folgenden Funktionsskizzen verwenden „Das verlorene Imperium“. Das Erscheinungsbild ist im klickbaren Prototyp ausgearbeitet. [Freigegebene Produktspezifikation](2026-11-20-schreibprogramm-design.md) · [Umsetzungsplan](../plans/2026-11-20-schreibwerkstatt.md)
 
 ## Fenster und Gestaltung
 
-Im geöffneten Projekt stehen links **Timeline**, **Kapitel**, **Manuskript** und **Welt**. Projektname und „Speichern“ stehen oben. Einstellungen und Export sind über das Projektmenü erreichbar, Export zusätzlich direkt im Manuskript. Rechts öffnet sich bei Bedarf genau ein Kontextbereich. Dort erscheinen beispielsweise Ereignisdetails, Figurenwissen oder ein KI-Gespräch. Beim Schließen geht der Tastaturfokus zur auslösenden Stelle zurück.
+Die Titelleiste trägt den Projektnamen und die aktive Ansicht. Darunter hat jeder Arbeitsbereich eine kompakte Werkzeugzeile für seine Befehle. Die Quellliste links bündelt **Timeline**, **Kapitel**, **Manuskript** und **Welt**. **Schreiben** führt zurück zur aktiven Szene. Konsistenz und Einstellungen stehen unter **Projektwerkzeuge**. Die Statusleiste bleibt am unteren Fensterrand. Sie zeigt die Dateisicherung, die letzte lokale Version und im Editor das Dokumentformat.
 
-Bei einer Entwurfsgröße von 1440 × 900 px sind rund 184 px für die Navigation und bei Bedarf 340 px für den Kontextbereich vorgesehen. Der Editor zentriert etwa 70 Zeichen pro Zeile. Bei schmalen Fenstern lässt sich die Navigation einklappen. Details und Vorschau erscheinen dann als umschaltbare Ansichten mit Rückkehr zur zuletzt bearbeiteten Stelle. In der Timeline stehen „Netz“ und „Liste“ für dieselben Ereignisse und dieselbe Auswahl zur Verfügung. Die Liste beschriftet Beziehungen direkt und ist per Tastatur vollständig bedienbar.
+Die Quellliste startet bei etwa 200 px. Bei Bedarf öffnet sich rechts ein Inspektor für Eigenschaften, Quellen, Prüffunde oder ein Gespräch. Für die native Umsetzung sind verstellbare Trenner und eine einklappbare Quellliste vorgesehen. Bei wenig Fensterbreite teilen sich Editor und Inspektor die Arbeitsfläche über einen Ansichtswechsel. Der Fokus kehrt nach dem Schließen zum auslösenden Bedienelement zurück. Die Prototyp-Vorschau stapelt die Bereiche bei schmalen Fenstern, damit ihr Inhalt sichtbar bleibt.
 
-Die Schreibfläche ist warmweiß (`#FBF8F2`), die Oberfläche leinenfarben (`#F0EAE0`), der Text tintendunkel (`#27231E`). Dunkles Petrol (`#235A54`) markiert Auswahl und Primäraktionen. Ein ockerfarbener Rand mit der Beschriftung **Konzept** kennzeichnet Passagen in Text und Vorschau. Bedienelemente nutzen die Systemschrift, der Markdown-Quelltext eine gut lesbare Monospace-Schrift und die formatierte Vorschau eine Serifenschrift. Im Dunkelmodus liegen die Flächen in warmem Anthrazit. Fokus, Status und Beziehungstyp bleiben durch Schrift, Rahmen oder Linienform erkennbar.
+Die Oberfläche verwendet kühles Grau für Fensterleisten und Quellliste, Weiß für die Arbeitsfläche und Schieferblau für Auswahl und Fokus. Dünne Trenner markieren die Arbeitsbereiche. Systemschrift gilt für Menüs, Listen und Inspektoren, Monospace für Markdown und Serifenschrift für den gesetzten Buchtext. Der Editor zentriert den Text auf etwa 70 Zeichen pro Zeile. Die Vorschau bleibt beim ersten Öffnen eingeklappt. Ein ockerfarbener Rand mit **Konzept** kennzeichnet Entwurfspassagen. Der Dunkelmodus folgt der Systemdarstellung.
+
+| Ansicht | Aufbau im Desktopfenster |
+| --- | --- |
+| Projektwahl | Kompakte Liste zuletzt geöffneter Buchordner mit Öffnen- und Neu-Befehl. |
+| Timeline | Zeichenfläche mit Raster und umschaltbarer Ereignisliste. Der Inspektor zeigt Eigenschaften des ausgewählten Ereignisses. |
+| Brainstorming | Die beiden Ereignisse bleiben auf der Arbeitsfläche sichtbar. Das zugehörige Gespräch steht daneben. |
+| Kapitelordnung | Eingerückte Szenen unter aufklappbaren Kapitelzeilen. Der Inspektor zeigt Erzählposition und Zeitbezüge. |
+| Szeneneditor | Dokumentkopf mit Szenenname und Kapitelpfad, schmale Formatierleiste und zentrierter Markdown-Text. Vorschau und Szenendetails teilen sich den rechten Bereich. |
+| Weltkartei | Quellenliste für Figuren, Orte und Ideen, Detailansicht für den gewählten Eintrag und Quellennachweise im Inspektor. |
+| Gesamtmanuskript | Inhaltsverzeichnis neben einer weißen Lesefläche auf grauem Grund. Export steht in der Werkzeugzeile. |
+| Konsistenzprüfung | Befundliste links. Rechts stehen die beiden Aussagen mit ihren Fundstellen und dem Vermerkbefehl. |
+| Projekteinstellungen | Nach Thema gruppierte Felder für KI, Projektordner und Versionen. |
+
+Die native App verwendet die Menü- und Tastaturkonventionen des jeweiligen Betriebssystems. **Speichern** erstellt eine lokale Git-Version und ist mit ⌘S auf macOS beziehungsweise Strg+S unter Windows und Linux erreichbar. Das automatische Schreiben des Texts zeigt die Statusleiste separat.
 
 ## 1. Projekt öffnen oder anlegen
 

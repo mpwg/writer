@@ -5,65 +5,78 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Schreibwerkstatt · Klickbarer Prototyp</title>
 <style>
-:root{color-scheme:light dark;background:light-dark(#f5f2ed,#1a1b18)}
-body{margin:0;padding:clamp(8px,2vw,24px)}
-#schreibwerkstatt{max-width:1440px;margin-inline:auto}
-#schreibwerkstatt{color-scheme:light dark;--paper:light-dark(#fbf8f2,#262622);--panel:light-dark(#f4efe6,#2c2c27);--rail:light-dark(#eee8dc,#22231f);--ink:light-dark(#27231e,#f2eadc);--soft:light-dark(#655e54,#bdb6a8);--line:light-dark(#d9d0c2,#504c41);--accent:light-dark(#235a54,#a5d5c8);--solid:light-dark(#235a54,#a5d5c8);--on-solid:light-dark(#fffaf1,#182e28);--wash:light-dark(#dfebe3,#334840);--ochre:light-dark(#805420,#e0b97d);--concept:light-dark(#f5ead3,#413625);--serif:Iowan Old Style,Palatino Linotype,Palatino,Georgia,serif;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--space:clamp(16px,2.65cqi,30px);font:14px/1.45 system-ui,sans-serif;color:var(--ink);container-type:inline-size}
+:root{color-scheme:light dark;background:light-dark(#e9edf2,#16191e)}
+body{margin:0;padding:clamp(8px,2.25vw,32px)}
+#schreibwerkstatt{
+  max-width:1440px;margin-inline:auto;container-type:inline-size;
+  --paper:light-dark(#fff,#22262c);--panel:light-dark(#f3f5f7,#282d35);
+  --rail:light-dark(#e8ecf1,#20252c);--toolbar:light-dark(#e1e6ec,#30363f);
+  --ink:light-dark(#212933,#edf0f5);--soft:light-dark(#55616e,#acb7c5);
+  --line:light-dark(#c9d1db,#414b58);--accent:light-dark(#244f7b,#b4d4f6);
+  --wash:light-dark(#d9e6f4,#344a61);--ochre:light-dark(#7a4d15,#f2cc8a);
+  --concept:light-dark(#fff5df,#3c3123);
+  --serif:Charter,Iowan Old Style,Georgia,serif;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+  --space:clamp(12px,2cqi,24px);
+  font:13px/1.45 system-ui,sans-serif;color:var(--ink)
+}
 #schreibwerkstatt *{box-sizing:border-box}
 #schreibwerkstatt [hidden]{display:none!important}
 #schreibwerkstatt :is(h1,h2,h3,p,ol,ul,blockquote){margin:0}
-#schreibwerkstatt :is(h1,h2){font-family:var(--serif);line-height:1.08;font-weight:500}
-#schreibwerkstatt h1{font-size:clamp(29px,4.1cqi,47px);letter-spacing:-.035em}
-#schreibwerkstatt h2{font-size:27px;letter-spacing:-.025em}
-#schreibwerkstatt h3{font-size:14px;font-weight:650}
+#schreibwerkstatt :is(h1,h2,h3){font:650 13px/1.35 system-ui,sans-serif}
+#schreibwerkstatt .head h1{font-size:14px}
+#schreibwerkstatt .pad h2{font-size:17px}
 #schreibwerkstatt button,#schreibwerkstatt select,#schreibwerkstatt input{font:inherit}
-#schreibwerkstatt button,#schreibwerkstatt select{color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:7px 11px;cursor:pointer}
+#schreibwerkstatt button,#schreibwerkstatt select{color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:4px;min-block-size:27px;padding:3px 8px;cursor:pointer}
 #schreibwerkstatt button:hover{border-color:var(--accent)}
 #schreibwerkstatt button:focus-visible,#schreibwerkstatt select:focus-visible,#schreibwerkstatt input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-#schreibwerkstatt button.primary{background:var(--solid);border-color:var(--solid);color:var(--on-solid)}
+#schreibwerkstatt button.primary{background:var(--wash);border-color:var(--line);color:var(--accent);font-weight:600}
 #schreibwerkstatt button.plain{background:transparent;border-color:transparent;text-align:start}
 #schreibwerkstatt button.plain:hover{background:var(--panel);border-color:var(--line)}
-#schreibwerkstatt button.link{background:none;border:0;padding:4px 0;text-align:start;color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+#schreibwerkstatt button.link{background:none;border:0;padding:2px 0;text-align:start;color:var(--accent)}
 #schreibwerkstatt button[aria-current="page"],#schreibwerkstatt button[aria-pressed="true"],#schreibwerkstatt .selected{background:var(--wash);border-color:var(--accent);color:var(--accent)}
-#schreibwerkstatt .preview-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-block-end:12px;color:var(--soft)}
+#schreibwerkstatt .preview-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-block-start:12px;justify-content:center;color:var(--soft)}
 #schreibwerkstatt .preview-bar label{margin-inline-end:5px;font-size:13px}
 #schreibwerkstatt .preview-bar select{max-inline-size:100%;color:var(--ink)}
-#schreibwerkstatt .window{background:var(--paper);border:1px solid var(--line);border-radius:13px;box-shadow:0 12px 30px #1b160e22}
-#schreibwerkstatt .chrome{display:flex;align-items:center;gap:10px;min-block-size:57px;padding:9px 15px;background:var(--panel);border-block-end:1px solid var(--line);border-radius:12px 12px 0 0;flex-wrap:wrap}
-#schreibwerkstatt .mark{display:inline-grid;place-items:center;inline-size:29px;block-size:29px;border-radius:7px;background:var(--solid);color:var(--on-solid);font:21px/1 var(--serif);flex:none}
+#schreibwerkstatt .window{background:var(--paper);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px #141e2a25}
+#schreibwerkstatt .chrome{display:flex;align-items:center;gap:8px;min-block-size:42px;padding:6px 11px;background:var(--toolbar);border-block-end:1px solid var(--line);border-radius:7px 7px 0 0;flex-wrap:wrap}
+#schreibwerkstatt .mark{font-size:17px;color:var(--accent)}
+#schreibwerkstatt .window-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-inline-size:0}
+#schreibwerkstatt .window-title small{font-weight:400}
 #schreibwerkstatt .push{margin-inline-start:auto}
-#schreibwerkstatt .shell{display:grid;grid-template-columns:clamp(124px,17cqi,173px) minmax(0,1fr);min-block-size:525px}
-#schreibwerkstatt .rail{background:var(--rail);border-inline-end:1px solid var(--line);padding:17px 11px;display:flex;flex-direction:column;gap:5px}
-#schreibwerkstatt .rail button{display:flex;align-items:center;gap:8px;inline-size:100%;min-inline-size:0}
-#schreibwerkstatt .rail .icon{inline-size:16px;flex:none;text-align:center}
-#schreibwerkstatt .rail button:last-child{margin-block-start:auto}
+#schreibwerkstatt .shell{display:grid;grid-template-columns:clamp(148px,18cqi,210px) minmax(0,1fr);min-block-size:590px}
+#schreibwerkstatt .rail{background:var(--rail);border-inline-end:1px solid var(--line);padding:13px 8px;display:flex;flex-direction:column;gap:1px}
+#schreibwerkstatt .rail .label{padding:4px 8px;color:var(--soft)}
+#schreibwerkstatt .rail .label:not(:first-child){margin-block-start:10px}
+#schreibwerkstatt .rail button{display:flex;align-items:center;gap:7px;inline-size:100%;min-inline-size:0}
+#schreibwerkstatt .rail button[aria-current="page"]{box-shadow:inset 2px 0 var(--accent);border-color:transparent;font-weight:600}
+#schreibwerkstatt .rail .icon{inline-size:16px;flex:none;text-align:center;color:var(--accent)}
+#schreibwerkstatt .rail .scene-item{padding-inline-start:23px;font-size:12px}
 #schreibwerkstatt .work{min-inline-size:0;display:flex;flex-direction:column}
-#schreibwerkstatt .head{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:24px var(--space) 18px;border-block-end:1px solid var(--line)}
-#schreibwerkstatt .head p{margin-block-end:5px}
+#schreibwerkstatt .head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-block-size:39px;flex-wrap:wrap;padding:5px 12px;background:var(--panel);border-block-end:1px solid var(--line)}
+#schreibwerkstatt .head p{margin:0}
+#schreibwerkstatt .head .document-tab{display:flex;align-items:center;gap:7px;border-inline-end:1px solid var(--line);padding:3px 12px 3px 0}
+#schreibwerkstatt .head .document-tab .icon{color:var(--accent)}
 #schreibwerkstatt .caption,#schreibwerkstatt small{font-size:12px;color:var(--soft)}
-#schreibwerkstatt .label{font-size:11px;font-weight:660;letter-spacing:.085em;text-transform:uppercase;color:var(--soft)}
+#schreibwerkstatt .label{font-size:11px;font-weight:650;color:var(--soft)}
 #schreibwerkstatt .actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
-#schreibwerkstatt .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(205px,30%);flex:1}
+#schreibwerkstatt .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,28%);flex:1}
 #schreibwerkstatt .split.even{grid-template-columns:repeat(2,minmax(0,1fr))}
 #schreibwerkstatt .pad{padding:var(--space);min-inline-size:0}
 #schreibwerkstatt .inspector{background:var(--panel);border-inline-start:1px solid var(--line)}
-#schreibwerkstatt .stack>*+*{margin-block-start:13px}
+#schreibwerkstatt .stack>*+*{margin-block-start:10px}
 #schreibwerkstatt .section{border-block-start:1px solid var(--line);padding-block-start:13px}
 #schreibwerkstatt .muted{color:var(--soft)}
-#schreibwerkstatt .foot{display:flex;flex-wrap:wrap;gap:7px 14px;padding:8px 14px;border-block-start:1px solid var(--line);background:var(--panel);border-radius:0 0 12px 12px;font-size:12px;color:var(--soft)}
+#schreibwerkstatt .foot{display:flex;flex-wrap:wrap;gap:3px 14px;padding:4px 11px;border-block-start:1px solid var(--line);background:var(--panel);border-radius:0 0 7px 7px;font-size:11px;color:var(--soft)}
 #schreibwerkstatt .foot strong{color:var(--accent);font-weight:600}
-#schreibwerkstatt .welcome{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,35%);gap:clamp(18px,5cqi,50px);align-items:center;padding:clamp(30px,7cqi,74px);min-block-size:525px}
-#schreibwerkstatt .recent{padding-block-start:20px;border-block-start:1px solid var(--line);margin-block-start:36px}
-#schreibwerkstatt .recent-item{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding-block-start:12px}
-#schreibwerkstatt .cover{position:relative;display:grid;align-content:space-between;justify-items:center;aspect-ratio:3/4;max-inline-size:237px;inline-size:100%;margin-inline:auto;padding:27px 15px;background:#223e36;color:#efe5cb;border:1px solid #60725c;border-inline-start:9px solid #162b25;box-shadow:7px 9px 0 #45372228;text-align:center}
-#schreibwerkstatt .cover::before{content:"";position:absolute;inset:9px;border:1px solid #a59c70;pointer-events:none}
-#schreibwerkstatt .cover strong{font:clamp(23px,4cqi,38px)/1.02 var(--serif);align-self:end}
-#schreibwerkstatt .ring{inline-size:38%;aspect-ratio:1;border:2px solid #dac285;border-radius:50%;box-shadow:0 0 0 4px #223e36,0 0 0 5px #9d8c5c;margin-block:15px}
-#schreibwerkstatt .cover small{color:#efe5cb;font-size:11px;letter-spacing:.12em}
-#schreibwerkstatt .chart{background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:15px 15px}
+#schreibwerkstatt .welcome{max-inline-size:680px;margin-inline:auto;padding:clamp(16px,4cqi,42px) var(--space);min-block-size:320px}
+#schreibwerkstatt .recent{border:1px solid var(--line);border-radius:4px;margin-block:10px 13px}
+#schreibwerkstatt .recent .label{padding:5px 9px;background:var(--rail);border-block-end:1px solid var(--line)}
+#schreibwerkstatt .recent-item{display:flex;flex-wrap:wrap;gap:9px;align-items:center;padding:8px}
+#schreibwerkstatt .document-icon{display:grid;place-items:center;width:28px;height:35px;background:var(--wash);color:var(--accent);border:1px solid var(--line);border-radius:3px}
+#schreibwerkstatt .chart{background-color:var(--panel);background-image:linear-gradient(to right,var(--line) 1px,transparent 1px),linear-gradient(to bottom,var(--line) 1px,transparent 1px);background-size:24px 24px;background-position:11px 11px}
 #schreibwerkstatt .graph{display:grid;grid-template-columns:minmax(0,1fr) minmax(60px,.55fr) minmax(0,1fr);align-items:center;gap:4px;margin-block:14px 22px}
-#schreibwerkstatt .node{background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:12px;min-inline-size:0;overflow-wrap:anywhere;box-shadow:0 2px 4px #1b160e13}
-#schreibwerkstatt button.node{text-align:start;padding:12px}
+#schreibwerkstatt .node{background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:9px;min-inline-size:0;overflow-wrap:anywhere}
+#schreibwerkstatt button.node{text-align:start;padding:9px}
 #schreibwerkstatt .node strong{display:block;margin-block-end:4px}
 #schreibwerkstatt .edge{text-align:center;color:var(--soft);font-size:11px}
 #schreibwerkstatt .rule{display:block;border-block-start:1px solid var(--accent);margin-block:6px;position:relative}
@@ -71,31 +84,32 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
 #schreibwerkstatt .down{grid-column:3;text-align:center;color:var(--accent);font-size:21px;line-height:1.1}
 #schreibwerkstatt .unordered{max-inline-size:235px;margin-block:9px 18px}
 #schreibwerkstatt .legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--soft);font-size:11px}
-#schreibwerkstatt .bubble{padding:10px 12px;background:var(--wash);border-radius:8px;color:var(--ink)}
-#schreibwerkstatt .chapter{padding:8px 0 4px;border-block-start:1px solid var(--line)}
-#schreibwerkstatt .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 8px;border:1px solid transparent;border-radius:5px;min-inline-size:0}
+#schreibwerkstatt .bubble{padding:7px 9px;background:var(--paper);border-inline-start:2px solid var(--accent);color:var(--ink)}
+#schreibwerkstatt .chapter{padding:5px 0 3px;border-block-start:1px solid var(--line)}
+#schreibwerkstatt .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 8px;border:1px solid transparent;border-radius:2px;min-inline-size:0}
 #schreibwerkstatt button.row{width:100%;text-align:start}
 #schreibwerkstatt .tag{display:inline-block;padding:2px 7px;border-radius:3px;background:var(--concept);color:var(--ochre);font:600 11px/1.5 system-ui,sans-serif}
-#schreibwerkstatt .editor-tools{padding:9px var(--space);border-block-end:1px solid var(--line)}
-#schreibwerkstatt .source{font:13px/1.7 var(--mono);overflow-wrap:anywhere}
+#schreibwerkstatt .editor-tools{padding:4px 12px;background:var(--panel);border-block-end:1px solid var(--line)}
+#schreibwerkstatt .source{max-inline-size:78ch;margin-inline:auto;padding:clamp(15px,4cqi,45px) var(--space);font:14px/1.7 var(--mono);overflow-wrap:anywhere}
+#schreibwerkstatt .source [contenteditable]:focus-visible{outline:1px solid var(--accent);outline-offset:5px}
 #schreibwerkstatt .prose{font:16px/1.62 var(--serif)}
 #schreibwerkstatt .source p,#schreibwerkstatt .prose :is(p:not(.label),li){font-family:inherit}
-#schreibwerkstatt .prose h2{font-size:32px}
+#schreibwerkstatt .prose h2{font:500 29px/1.2 var(--serif)}
 #schreibwerkstatt .passage{padding:10px 12px;border-inline-start:3px solid var(--ochre);background:var(--concept)}
 #schreibwerkstatt .passage ul{padding-inline-start:18px}
 #schreibwerkstatt .passage .tag{padding-inline:0}
 #schreibwerkstatt .directory{display:grid;grid-template-columns:minmax(110px,20%) minmax(0,1fr) minmax(205px,34%);flex:1}
 #schreibwerkstatt .index{background:var(--panel);border-inline-end:1px solid var(--line);padding:15px 11px;min-inline-size:0}
 #schreibwerkstatt .index button{display:block;inline-size:100%}
-#schreibwerkstatt .manuscript{display:grid;grid-template-columns:minmax(135px,25%) minmax(0,1fr);flex:1}
-#schreibwerkstatt .book-page{max-inline-size:520px;margin-inline:auto}
+#schreibwerkstatt .manuscript{display:grid;grid-template-columns:minmax(155px,23%) minmax(0,1fr);flex:1;background:var(--panel)}
+#schreibwerkstatt .book-page{max-inline-size:620px;margin-inline:auto;padding:clamp(15px,4cqi,48px);background:var(--paper);border:1px solid var(--line)}
 #schreibwerkstatt .quote{border-inline-start:2px solid var(--line);padding-inline-start:12px}
 #schreibwerkstatt .settings{max-inline-size:610px}
 #schreibwerkstatt .setting{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding-block:13px;border-block-end:1px solid var(--line)}
 #schreibwerkstatt .setting input{appearance:none;position:relative;inline-size:40px;block-size:23px;margin:0;border:1px solid var(--line);border-radius:100px;background:var(--rail);cursor:pointer}
 #schreibwerkstatt .setting input::before{content:"";position:absolute;inset-block-start:3px;inset-inline-start:3px;inline-size:15px;block-size:15px;border-radius:50%;background:var(--soft)}
-#schreibwerkstatt .setting input:checked{background:var(--solid);border-color:var(--solid)}
-#schreibwerkstatt .setting input:checked::before{inset-inline-start:20px;background:var(--on-solid)}
+#schreibwerkstatt .setting input:checked{background:var(--accent);border-color:var(--accent)}
+#schreibwerkstatt .setting input:checked::before{inset-inline-start:20px;background:var(--paper)}
 #schreibwerkstatt .status-list{display:grid;gap:8px;padding-block-start:8px}
 #schreibwerkstatt .inline-form input{min-inline-size:0;inline-size:100%;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink)}
 @container (width < 765px){
@@ -106,11 +120,11 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
   #schreibwerkstatt .shell{grid-template-columns:minmax(0,1fr)}
   #schreibwerkstatt .rail{display:flex;flex-direction:row;flex-wrap:wrap;border-inline-end:0;border-block-end:1px solid var(--line);padding:7px}
   #schreibwerkstatt .rail button{inline-size:auto;padding:5px 7px}
-  #schreibwerkstatt .welcome{padding:24px;min-block-size:400px}
+  #schreibwerkstatt .rail .label{display:none}
+  #schreibwerkstatt .shell{min-block-size:420px}
 }
 @container (width < 500px){
-  #schreibwerkstatt :is(.split,.split.even,.welcome,.manuscript){grid-template-columns:minmax(0,1fr)}
-  #schreibwerkstatt .welcome .cover{max-inline-size:155px;margin-block-start:10px}
+  #schreibwerkstatt :is(.split,.split.even,.manuscript){grid-template-columns:minmax(0,1fr)}
   #schreibwerkstatt .inspector{border-inline-start:0;border-block-start:1px solid var(--line)}
   #schreibwerkstatt .manuscript .index{border-inline-end:0;border-block-end:1px solid var(--line)}
 }
@@ -119,59 +133,42 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
 </head>
 <body>
 <main id="schreibwerkstatt">
-<div class="preview-bar" role="group" aria-label="Mockup-Auswahl">
-  <button type="button" data-step="-1" aria-label="Vorherige Ansicht">←</button>
-  <label for="sw-view">Ansicht</label>
-  <select id="sw-view">
-    <option value="projekt">Projektwahl</option>
-    <option value="timeline">Timeline</option>
-    <option value="ideen">Brainstorming</option>
-    <option value="kapitel">Kapitelordnung</option>
-    <option value="editor">Szeneneditor</option>
-    <option value="welt">Weltkartei</option>
-    <option value="manuskript">Gesamtmanuskript</option>
-    <option value="pruefung">Konsistenzprüfung</option>
-    <option value="einstellungen">Projekteinstellungen</option>
-  </select>
-  <button type="button" data-step="1" aria-label="Nächste Ansicht">→</button>
-</div>
 <div class="window">
   <header class="chrome">
-    <span class="mark" aria-hidden="true">S</span>
-    <strong data-project-brand>Schreibwerkstatt</strong>
-    <button type="button" data-go="einstellungen" class="plain" data-project-chrome hidden>Projekt ▾</button>
-    <button type="button" class="primary push" data-save data-project-chrome hidden>Speichern</button>
+    <span class="mark" aria-hidden="true">▤</span>
+    <div class="window-title"><strong data-project-brand>Schreibwerkstatt</strong><small data-window-view data-project-chrome hidden></small></div>
+    <button type="button" data-go="projekt" class="plain push" data-project-chrome hidden>Projektwahl</button>
+    <button type="button" data-save data-project-chrome hidden aria-keyshortcuts="Meta+S Control+S">Speichern</button>
   </header>
   <section data-screen="projekt" class="welcome" aria-label="Projektwahl">
-    <div class="stack">
-      <h1>Deine Buchprojekte</h1>
-      <div class="actions">
-        <button type="button" class="primary" data-go="timeline">Ordner öffnen …</button>
-        <button type="button" data-show="new-book" aria-expanded="false">Neues Buchprojekt …</button>
-      </div>
-      <div class="inline-form stack" id="new-book" hidden>
-        <label for="book-title">Buchtitel</label>
-        <input id="book-title" placeholder="Titel eingeben">
-        <button type="button" data-go="timeline">Ordner wählen …</button>
-      </div>
-      <div class="recent">
-        <p class="label">Zuletzt geöffnet</p>
-        <div class="recent-item">
-          <div><h3>Der Herr der Ringe</h3><p class="caption">Bücher / Der Herr der Ringe</p></div>
-          <button type="button" data-go="timeline">Öffnen ↗</button>
-        </div>
+    <h1>Buchprojekt öffnen</h1>
+    <div class="recent">
+      <p class="label">Zuletzt geöffnet</p>
+      <div class="recent-item">
+        <span class="document-icon" aria-hidden="true">▤</span>
+        <div><h2>Der Herr der Ringe</h2><p class="caption">Bücher / Der Herr der Ringe</p></div>
+        <button type="button" class="primary push" data-go="timeline">Öffnen ↗</button>
       </div>
     </div>
-    <div class="cover" aria-label="Stilisiertes Cover des Beispielprojekts">
-      <small>J. R. R. Tolkien</small><span class="ring" aria-hidden="true"></span><strong>Der Herr<br>der Ringe</strong>
+    <div class="actions">
+      <button type="button" data-show="new-book" aria-expanded="false" aria-controls="new-book">Neues Buchprojekt …</button>
+      <button type="button" data-go="timeline">Ordner öffnen …</button>
+    </div>
+    <div class="inline-form stack" id="new-book" hidden>
+      <label for="book-title">Buchtitel</label>
+      <input id="book-title" placeholder="Titel eingeben">
+      <button type="button" data-go="timeline">Ordner wählen …</button>
     </div>
   </section>
   <div class="shell" hidden>
-    <nav class="rail" aria-label="Buchprojekt">
+    <nav class="rail" aria-label="Quellliste des Buchprojekts">
+      <p class="label">Buchprojekt</p>
       <button type="button" class="plain" data-go="timeline"><span class="icon" aria-hidden="true">⇢</span>Timeline</button>
       <button type="button" class="plain" data-go="kapitel"><span class="icon" aria-hidden="true">☷</span>Kapitel</button>
+      <button type="button" class="plain scene-item" data-go="editor"><span class="icon" aria-hidden="true">↳</span>Schreiben</button>
       <button type="button" class="plain" data-go="manuskript"><span class="icon" aria-hidden="true">▤</span>Manuskript</button>
       <button type="button" class="plain" data-go="welt"><span class="icon" aria-hidden="true">▥</span>Welt</button>
+      <p class="label">Projektwerkzeuge</p>
       <button type="button" class="plain" data-go="pruefung"><span class="icon" aria-hidden="true">✓</span>Konsistenz</button>
       <button type="button" class="plain" data-go="einstellungen"><span class="icon" aria-hidden="true">⚙</span>Einstellungen</button>
     </nav>
@@ -239,18 +236,18 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
       </div>
     </section>
     <section data-screen="editor" class="work" aria-label="Szeneneditor" hidden>
-      <div class="head"><div><p class="caption">Kapitel 2 / Der Schatten der Vergangenheit</p><h1>Der Ring wird erkannt</h1></div><div class="actions"><button type="button" data-editor="preview" aria-pressed="true">Vorschau</button><button type="button" data-editor="details" aria-pressed="false">Szenendetails</button></div></div>
+      <div class="head"><div class="document-tab"><span class="icon" aria-hidden="true">▤</span><div><h1>Der Ring wird erkannt</h1><p class="caption">Kapitel 2 · Der Schatten der Vergangenheit</p></div></div><div class="actions"><button type="button" data-editor="preview" aria-pressed="false">Vorschau</button><button type="button" data-editor="details" aria-pressed="false">Szenendetails</button></div></div>
       <div class="editor-tools actions">
         <button type="button" data-format="bold" aria-label="Fett"><strong>B</strong></button><button type="button" data-format="italic" aria-label="Kursiv"><em>I</em></button><button type="button" data-format="heading" aria-label="Überschrift">H</button><button type="button" data-concept aria-pressed="true">Konzept</button><small class="push">Markdown</small>
       </div>
-      <div class="split even" data-editor-split>
+      <div class="even" data-editor-split>
         <div class="pad stack source" aria-label="Markdown-Quelltext">
           <p><span class="muted">##</span> Der Ring wird erkannt</p>
           <p data-editable contenteditable="plaintext-only" role="textbox" aria-label="Absatz bearbeiten">Frodo rückte den Stuhl ans Feuer. Auf dem Tisch lag der Ring, klein genug, um zwischen zwei Fingern zu verschwinden.</p>
           <div class="passage" data-concept-block><span class="tag">Konzept</span><p>- Gandalf erklärt, wem der Ring gehörte.</p><p>- Frodo fragt, warum der Ring ausgerechnet bei ihm gelandet ist.</p></div>
           <p>Im Kamin knackte ein Scheit.</p>
         </div>
-        <aside class="pad inspector stack prose" data-editor-panel="preview" aria-label="Formatierte Vorschau">
+        <aside class="pad inspector stack prose" data-editor-panel="preview" aria-label="Formatierte Vorschau" hidden>
           <p class="label">Formatierte Vorschau</p><h2>Der Ring wird erkannt</h2>
           <p data-preview-text>Frodo rückte den Stuhl ans Feuer. Auf dem Tisch lag der Ring, klein genug, um zwischen zwei Fingern zu verschwinden.</p>
           <div class="passage" data-concept-block><span class="tag">Konzept</span><ul><li>Gandalf erklärt, wem der Ring gehörte.</li><li>Frodo fragt, warum der Ring ausgerechnet bei ihm gelandet ist.</li></ul></div>
@@ -312,7 +309,23 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
       </div>
     </section>
   </div>
-  <footer class="foot" data-project-chrome hidden><strong>✓ Auf Festplatte gesichert</strong><span data-save-status role="status">Änderungen seit der letzten Version</span><span class="push">Lokales Projekt</span></footer>
+  <footer class="foot" data-project-chrome hidden><strong>✓ Auf Festplatte gesichert</strong><span data-save-status role="status">Änderungen seit der letzten Version</span><span class="push" data-work-status>Lokales Projekt</span></footer>
+</div>
+<div class="preview-bar" role="group" aria-label="Mockup-Auswahl">
+  <button type="button" data-step="-1" aria-label="Vorherige Ansicht">←</button>
+  <label for="sw-view">Prototyp-Ansicht</label>
+  <select id="sw-view">
+    <option value="projekt">Projektwahl</option>
+    <option value="timeline">Timeline</option>
+    <option value="ideen">Brainstorming</option>
+    <option value="kapitel">Kapitelordnung</option>
+    <option value="editor">Szeneneditor</option>
+    <option value="welt">Weltkartei</option>
+    <option value="manuskript">Gesamtmanuskript</option>
+    <option value="pruefung">Konsistenzprüfung</option>
+    <option value="einstellungen">Projekteinstellungen</option>
+  </select>
+  <button type="button" data-step="1" aria-label="Nächste Ansicht">→</button>
 </div>
 <script>
 (() => {
@@ -336,7 +349,7 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
     frodo: ["Frodo Beutlin", "Hobbit aus Hobbingen, Bilbos Erbe und Träger des Rings.", "Erfährt in Beutelsend, wem der Eine Ring gehörte."],
     gandalf: ["Gandalf", "Zauberer und Freund Bilbos und Frodos.", "Erkennt den Einen Ring und erklärt Frodo seine Herkunft."]
   };
-  let currentEditorPanel = "preview";
+  let currentEditorPanel = "";
   let markedFinding = false;
 
   function showPage(page) {
@@ -347,7 +360,9 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
     get(".shell").hidden = isProjectPicker;
     for (const element of projectChrome) element.hidden = isProjectPicker;
     get("[data-project-brand]").textContent = isProjectPicker ? "Schreibwerkstatt" : "Der Herr der Ringe";
-    const group = { ideen: "timeline", editor: "kapitel" }[page] || page;
+    get("[data-window-view]").textContent = "— " + picker.selectedOptions[0].textContent;
+    get("[data-work-status]").textContent = page === "editor" ? "Markdown · UTF-8" : "Lokales Projekt";
+    const group = page === "ideen" ? "timeline" : page;
     for (const button of nav) {
       if (button.dataset.go === group) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
@@ -373,6 +388,12 @@ body{margin:0;padding:clamp(8px,2vw,24px)}
     get("[data-finding-label]").textContent = "Keine offenen Prüffunde";
     get("[data-marked-status]").textContent = "Aufbruch aus dem Auenland · als beabsichtigt vermerkt";
   }
+
+  document.addEventListener("keydown", (event) => {
+    if (picker.value === "projekt" || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "s") return;
+    event.preventDefault();
+    showVersion();
+  });
 
   const preview = get("[data-preview-text]");
   function syncPreview() {
