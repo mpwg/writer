@@ -48,6 +48,7 @@ pub struct ProjectView {
     last_version: Option<String>,
     last_export: Option<PathBuf>,
     preview: bool,
+    show_scene_details: bool,
     scene_text: Option<writer::passage::SceneText>,
     scene_baseline: Option<writer::Document>,
     page: Page,
@@ -90,6 +91,7 @@ impl ProjectView {
             last_version: None,
             last_export: None,
             preview: false,
+            show_scene_details: false,
             scene_text: None,
             scene_baseline: None,
             page: Page::Timeline,
@@ -405,6 +407,7 @@ impl ProjectView {
             editor.set_value(text.text().to_owned(), window, cx)
         });
         self.scene_text = Some(text);
+        self.show_scene_details = false;
         self.scene_baseline = Some(scene.clone());
         self.page = Page::Scene;
         self.selected_scene = Some(id);
@@ -645,7 +648,23 @@ impl ProjectView {
             .flex_col()
             .gap_2()
             .child(div().text_lg().child(scene.title().to_owned()))
-            .child(self.scene_timing(project, scene.id(), cx))
+            .child(
+                div().flex().items_center().gap_2().child(
+                    Button::new("scene-details")
+                        .label(if self.show_scene_details {
+                            "Szenendetails schließen"
+                        } else {
+                            "Szenendetails"
+                        })
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            view.show_scene_details = !view.show_scene_details;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .when(self.show_scene_details, |layout| {
+                layout.child(self.scene_timing(project, scene.id(), cx))
+            })
             .child(
                 div()
                     .flex()

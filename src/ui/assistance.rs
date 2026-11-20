@@ -36,6 +36,7 @@ enum Pending {
         snapshot: SceneText,
     },
     Research(ResearchRun),
+    ResearchSummary(Vec<Citation>),
     Consistency(ConsistencyRun),
 }
 
@@ -355,8 +356,10 @@ impl ProjectView {
                         self.ai.streaming.clear();
                         let pending = self.ai.pending.take().map(|(_, pending)| pending);
                         self.ai.status = Some(error.to_string());
-                        if matches!(pending, Some(Pending::Research(_)))
-                            && !self.ai.answers.is_empty()
+                        if matches!(
+                            pending,
+                            Some(Pending::Research(_) | Pending::ResearchSummary(_))
+                        ) && !self.ai.answers.is_empty()
                         {
                             self.ai.status = Some(format!("Recherche unvollständig. {error}"));
                         }
@@ -456,6 +459,15 @@ impl ProjectView {
                 self.ai.details.add(scene, suggestions);
             }
             Pending::Research(run) => self.continue_research(run, &text, cx),
+            Pending::ResearchSummary(citations) => {
+                let answers = self.verified_answers(&text, &citations);
+                if let Some(answers) = answers.filter(|items| !items.is_empty()) {
+                    self.ai.answers = answers;
+                    self.ai.status = Some("Recherche abgeschlossen.".into());
+                } else {
+                    self.ai.status = Some("Die Zusammenfassung ließ sich nicht belegen. Die geprüften Einzelantworten sind unten aufgeführt.".into());
+                }
+            }
             Pending::Consistency(run) => self.continue_consistency(run, &text, cx),
         }
     }
@@ -635,45 +647,46 @@ impl ProjectView {
 
     fn continue_research(&mut self, mut run: ResearchRun, text: &str, cx: &mut Context<Self>) {
         let Some(project) = &self.project else { return };
-        let live = Sources::build(project);
-        let Some(answers) = read_model::<Vec<ModelAnswer>>(text) else {
+        let Some(answers) = self.verified_answers(text, &run.current) else {
             self.ai.status = Some(
                 "Recherche unvollständig. Codex hat keine prüfbaren Quellenangaben geliefert."
                     .into(),
             );
             return;
         };
-        for answer in answers {
-            let references: Option<Vec<_>> = answer
-                .sources
-                .iter()
-                .map(|&index| {
-                    let source = run.current.get(index)?;
-                    matches!(live.resolve(&source.anchor), Resolution::Unique { .. })
-                        .then(|| source.clone())
-                })
-                .collect();
-            if let Some(citations) = references.filter(|items| !items.is_empty()) {
-                self.ai.answers.push(Answer {
-                    statement: answer.statement,
-                    citations,
-                });
-            }
-        }
+        self.ai.answers.extend(answers);
         if let Some(batch) = run.rest.pop_front() {
             run.current = batch;
             let request = research_request(project, &run);
             self.request_ai(request, Pending::Research(run), cx);
             return;
         }
-        let timeline = Timeline::from_project(project);
-        self.ai.answers.sort_by_key(|answer| {
-            answer
-                .citations
-                .iter()
-                .map(|source| source.evidence.scope(&timeline, run.at))
-                .min()
-        });
+        if self.ai.answers.len() > 1 {
+            let mut citations: Vec<Citation> = Vec::new();
+            for answer in &self.ai.answers {
+                for source in &answer.citations {
+                    if !citations.iter().any(|item| item.anchor == source.anchor) {
+                        citations.push(source.clone());
+                    }
+                }
+            }
+            let timeline = Timeline::from_project(project);
+            let context = citation_text(&citations, Some((&timeline, run.at)));
+            if context.len() <= 25_000 {
+                let prompt = format!(
+                    "Fasse die geprüften Textquellen zu einer Antwort zusammen. Halte offene oder unbelegte Aussagen offen. Unterscheide insbesondere Figurenwissen, Planung und Prosa. Wenn mehrere zeitlich ungeordnete Treffer die Frage nach der letzten Begegnung offenlassen, benenne das. Gib eine JSON-Liste mit statement und sources (Array von Quellennummern) aus. Frage: {}",
+                    truncate(&run.question, 3000)
+                );
+                self.request_ai(
+                    AiRequest::new(prompt).with_context(context),
+                    Pending::ResearchSummary(citations),
+                    cx,
+                );
+                return;
+            }
+            self.ai.status = Some("Die belegten Einzelergebnisse überschreiten den Kontextrahmen für eine gemeinsame Antwort.".into());
+            return;
+        }
         self.ai.status = Some(
             if self.ai.answers.is_empty() {
                 "Keine belegte Antwort gefunden."
@@ -682,6 +695,31 @@ impl ProjectView {
             }
             .into(),
         );
+    }
+
+    fn verified_answers(&self, text: &str, citations: &[Citation]) -> Option<Vec<Answer>> {
+        let live = Sources::build(self.project.as_ref()?);
+        Some(
+            read_model::<Vec<ModelAnswer>>(text)?
+                .into_iter()
+                .filter_map(|answer| {
+                    let references: Option<Vec<_>> = answer
+                        .sources
+                        .iter()
+                        .map(|&index| {
+                            let source = citations.get(index)?;
+                            matches!(live.resolve(&source.anchor), Resolution::Unique { .. })
+                                .then(|| source.clone())
+                        })
+                        .collect();
+                    let citations = references.filter(|items| !items.is_empty())?;
+                    Some(Answer {
+                        statement: answer.statement,
+                        citations,
+                    })
+                })
+                .collect(),
+        )
     }
 
     fn start_consistency(&mut self, cx: &mut Context<Self>) {
@@ -1157,6 +1195,26 @@ fn citation_text(sources: &[Citation], chronology: Option<(&Timeline, Option<Id>
                 source.anchor.quote()
             }
         );
+    }
+    if let Some((timeline, _)) = chronology {
+        use writer::timeline::TemporalOrder;
+        let _ = writeln!(context, "Belegte zeitliche Reihenfolge zwischen Quellen:");
+        for (i, earlier) in sources.iter().enumerate() {
+            for (j, later) in sources.iter().enumerate() {
+                if earlier
+                    .evidence
+                    .event
+                    .zip(later.evidence.event)
+                    .is_some_and(|(a, b)| timeline.compare(a, b) == TemporalOrder::Before)
+                {
+                    let _ = writeln!(context, "{i} liegt vor {j}");
+                }
+                if context.len() >= 26_000 {
+                    let _ = writeln!(context, "Weitere Reihenfolgevergleiche wurden gekürzt.");
+                    return context;
+                }
+            }
+        }
     }
     context
 }
@@ -1648,6 +1706,69 @@ impl ProjectView {
             )
     }
 
+    fn save_draft_note(
+        &mut self,
+        scene: Id,
+        holder: writer::knowledge::ClaimHolder,
+        cx: &mut Context<Self>,
+    ) {
+        use writer::knowledge::{Claim, ClaimState, Knowledge, KnowledgeKind};
+        let answer = self.input_prompt(cx);
+        if answer.is_empty() || !self.flush(cx) {
+            return;
+        }
+        let Some((project, store)) = self.project.as_ref().zip(self.store.as_mut()) else {
+            return;
+        };
+        let outline = Outline::from_project(project);
+        let Some(scene) = outline.scene(scene) else {
+            return;
+        };
+        let mut knowledge = Knowledge::from_project(project);
+        knowledge.create(
+            KnowledgeKind::Concept,
+            &format!("Notiz zu {}", scene.title),
+            &answer,
+            Some(Claim {
+                holder,
+                state: ClaimState::Knows,
+                from: scene.event.or(scene.timing.after),
+            }),
+        );
+        let result = knowledge.stage_changes(project, store);
+        if self.report(result, cx) && self.flush(cx) {
+            self.ai.status = Some("Antwort in der Weltkartei gesichert.".into());
+            cx.notify();
+        }
+    }
+
+    fn draft_note_controls(&self, scene: Id, cx: &mut Context<Self>) -> Div {
+        use writer::knowledge::ClaimHolder;
+        let mut row = div().flex().flex_wrap().gap_2().child(
+            Button::new("draft-author-note")
+                .label("Antwort als Autorenwissen sichern")
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.save_draft_note(scene, ClaimHolder::Author, cx)
+                })),
+        );
+        if let Some(project) = &self.project {
+            let outline = Outline::from_project(project);
+            if let Some(entry) = outline.scene(scene) {
+                row = row.children(entry.characters.iter().filter_map(|&id| {
+                    let character = project.document(id)?;
+                    Some(
+                        Button::new(format!("draft-note-{id}"))
+                            .label(format!("Als Wissen von {} sichern", character.title()))
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.save_draft_note(scene, ClaimHolder::Character(id), cx)
+                            })),
+                    )
+                }));
+            }
+        }
+        row
+    }
+
     pub(super) fn scene_assistance(&self, scene: Id, cx: &mut Context<Self>) -> Div {
         let draft_here = self
             .ai
@@ -1706,6 +1827,7 @@ impl ProjectView {
                     )
                     .child("Antwort auf Rückfrage oder Anweisung zur Überarbeitung")
                     .child(Textarea::new(&self.ai.input))
+                    .child(self.draft_note_controls(scene, cx))
                     .child(
                         self.request_button(
                             Button::new("revise-draft").label("Entwurf überarbeiten"),
