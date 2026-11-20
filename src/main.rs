@@ -1,7 +1,7 @@
 mod ui;
 
 use gpui_kit::*;
-use ui::project::{ProjectView, QuitWriter, SaveProject, UndoScene};
+use ui::project::{NewProject, OpenProject, ProjectView, QuitWriter, SaveProject, UndoScene};
 
 fn main() {
     let app = application().with_assets(assets::Assets);
@@ -11,11 +11,19 @@ fn main() {
         cx.bind_keys(writer_key_bindings());
         ProjectView::install_quit_action(cx);
         #[cfg(target_os = "macos")]
-        cx.set_menus([Menu::new("Schreibwerkstatt").items([
-            MenuItem::os_submenu("Dienste", SystemMenuType::Services),
-            MenuItem::separator(),
-            MenuItem::action("Schreibwerkstatt beenden", QuitWriter),
-        ])]);
+        cx.set_menus([
+            Menu::new("Schreibwerkstatt").items([
+                MenuItem::os_submenu("Dienste", SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Schreibwerkstatt beenden", QuitWriter),
+            ]),
+            Menu::new("Ablage").items([
+                MenuItem::action("Neues Buchprojekt …", NewProject),
+                MenuItem::action("Buchprojekt öffnen …", OpenProject),
+                MenuItem::separator(),
+                MenuItem::action("Speichern", SaveProject),
+            ]),
+        ]);
         open_workspace_window(cx);
     });
 }
@@ -55,8 +63,26 @@ fn editor_undo_shortcut() -> &'static str {
     }
 }
 
-fn writer_key_bindings() -> [KeyBinding; 3] {
+fn writer_key_bindings() -> [KeyBinding; 5] {
     [
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-n"
+            } else {
+                "ctrl-n"
+            },
+            NewProject,
+            None,
+        ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-o"
+            } else {
+                "ctrl-o"
+            },
+            OpenProject,
+            None,
+        ),
         KeyBinding::new(
             if cfg!(target_os = "macos") {
                 "cmd-s"

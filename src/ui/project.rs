@@ -16,7 +16,10 @@ use gpui_kit::component::{
     scroll::ScrollableElement,
 };
 use gpui_kit::{prelude::FluentBuilder, *};
-actions!(writer_actions, [SaveProject, UndoScene, QuitWriter]);
+actions!(
+    writer_actions,
+    [NewProject, OpenProject, SaveProject, UndoScene, QuitWriter]
+);
 
 use writer::{
     Id, Project,
@@ -47,7 +50,7 @@ pub struct ProjectView {
     title: Entity<InputState>,
     destination: Entity<InputState>,
     picked_destination: Option<PathBuf>,
-    creating: bool,
+    creation_origin: Option<FocusHandle>,
     busy: bool,
     error: Option<String>,
     project: Option<Project>,
@@ -170,7 +173,7 @@ impl ProjectView {
             title: cx.new(|cx| InputState::new(window, cx)),
             destination: cx.new(|cx| InputState::new(window, cx)),
             picked_destination: None,
-            creating: false,
+            creation_origin: None,
             busy: false,
             error: None,
             project: None,
@@ -185,7 +188,7 @@ impl ProjectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy {
+        if self.busy || !self.flush(cx) {
             return;
         }
         self.busy = true;
@@ -230,6 +233,28 @@ impl ProjectView {
         .detach();
     }
 
+    fn start_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || !self.flush(cx) {
+            return;
+        }
+        self.creation_origin.get_or_insert_with(|| {
+            window
+                .focused(cx)
+                .unwrap_or_else(|| self.keyboard_focus.clone())
+        });
+        self.error = None;
+        self.title.update(cx, |title, cx| title.focus(window, cx));
+        cx.notify();
+    }
+
+    fn cancel_creating(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.error = None;
+        if let Some(origin) = self.creation_origin.take() {
+            window.focus(&origin, cx);
+        }
+        cx.notify();
+    }
+
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let title = self.title.read(cx).value();
         let path = self.destination.read(cx).value();
@@ -254,7 +279,7 @@ impl ProjectView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy {
+        if self.busy || !self.flush(cx) {
             return;
         }
         self.busy = true;
@@ -281,7 +306,8 @@ impl ProjectView {
                         view.restore_ai(window, cx);
                         view.selected_scene = None;
                         view.show_issues = false;
-                        view.creating = false;
+                        view.creation_origin = None;
+                        window.focus(&view.keyboard_focus, cx);
                     }
                     Err(error) => view.error = Some(error.to_string()),
                 }
@@ -318,31 +344,28 @@ impl ProjectView {
                         Button::new("new")
                             .label("Neues Buchprojekt …")
                             .disabled(self.busy)
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.creating = true;
-                                view.error = None;
-                                cx.notify();
-                            })),
+                            .on_click(
+                                cx.listener(|view, _, window, cx| view.start_creating(window, cx)),
+                            ),
                     ),
             )
-            .when(self.creating, |content| {
+            .when(self.creation_origin.is_some(), |content| {
                 content.child(
                     div()
                         .flex()
                         .flex_col()
                         .gap_2()
                         .child("Buchtitel")
-                        .child(Input::new(&self.title))
+                        .child(Input::new(&self.title).aria_label("Buchtitel"))
                         .child("Zielordner")
                         .child(
                             div()
                                 .flex()
                                 .gap_2()
                                 .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(Input::new(&self.destination)),
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.destination).aria_label("Zielordner"),
+                                    ),
                                 )
                                 .child(
                                     Button::new("choose")
@@ -370,10 +393,8 @@ impl ProjectView {
                                     Button::new("cancel")
                                         .label("Abbrechen")
                                         .disabled(self.busy)
-                                        .on_click(cx.listener(|view, _, _, cx| {
-                                            view.creating = false;
-                                            view.error = None;
-                                            cx.notify();
+                                        .on_click(cx.listener(|view, _, window, cx| {
+                                            view.cancel_creating(window, cx)
                                         })),
                                 ),
                         ),
@@ -1019,7 +1040,24 @@ impl Render for ProjectView {
         div()
             .id("workspace")
             .track_focus(&self.keyboard_focus)
-            .on_action(cx.listener(|view, _: &SaveProject, window, cx| view.checkpoint(window, cx)))
+            .when(!self.busy, |root| {
+                root.on_action(cx.listener(|view, _: &OpenProject, window, cx| {
+                    view.choose_directory(false, window, cx)
+                }))
+                .on_action(
+                    cx.listener(|view, _: &NewProject, window, cx| view.start_creating(window, cx)),
+                )
+            })
+            .when(
+                self.project.is_some() && self.creation_origin.is_none() && !self.busy,
+                |root| {
+                    root.on_action(
+                        cx.listener(|view, _: &SaveProject, window, cx| {
+                            view.checkpoint(window, cx)
+                        }),
+                    )
+                },
+            )
             .flex()
             .flex_col()
             .size_full()
@@ -1028,8 +1066,10 @@ impl Render for ProjectView {
             .text_color(if dark { rgb(0xf0eae0) } else { rgb(0x27231e) })
             .p_5()
             .child(match &self.project {
-                Some(project) => self.workspace(project, window, cx).into_any_element(),
-                None => div()
+                Some(project) if self.creation_origin.is_none() => {
+                    self.workspace(project, window, cx).into_any_element()
+                }
+                _ => div()
                     .flex_1()
                     .min_h_0()
                     .child(self.welcome(cx))

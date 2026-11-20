@@ -115,6 +115,121 @@ fn copy_project(source: &Path, target: &Path) {
 }
 
 #[gpui_kit::test]
+fn open_project_shortcut_saves_pending_text_before_switching_books(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let new_root = workspace.root.with_file_name("Zweites Buch");
+    Project::create(&new_root, "Zweites Buch").unwrap();
+    let path = workspace.root.join("Manuskript/Signal.md");
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input("Vor dem Buchwechsel. ", cx);
+    })
+    .unwrap();
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("Vor dem Buchwechsel.")
+    );
+
+    cx.simulate_keystrokes(
+        workspace.window,
+        if cfg!(target_os = "macos") {
+            "cmd-o"
+        } else {
+            "ctrl-o"
+        },
+    );
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(move |options| {
+        assert!(options.directories && !options.files && !options.multiple);
+        Some(vec![new_root])
+    });
+    cx.run_until_parked();
+
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("Vor dem Buchwechsel.")
+    );
+    workspace.update(cx, |view, _, _| {
+        assert_eq!(view.project.as_ref().unwrap().title(), "Zweites Buch");
+    });
+
+    // Der Befehl muss auch nach dem Wechsel sofort wieder erreichbar sein.
+    cx.simulate_keystrokes(
+        workspace.window,
+        if cfg!(target_os = "macos") {
+            "cmd-o"
+        } else {
+            "ctrl-o"
+        },
+    );
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn open_project_shortcut_keeps_both_versions_when_a_scene_conflicts(cx: &mut TestAppContext) {
+    let (workspace, path, external) = edit_scene_with_external_changes(cx);
+    cx.simulate_keystrokes(
+        workspace.window,
+        if cfg!(target_os = "macos") {
+            "cmd-o"
+        } else {
+            "ctrl-o"
+        },
+    );
+
+    assert!(!cx.did_prompt_for_paths());
+    assert_eq!(fs::read_to_string(path).unwrap(), external);
+    workspace.update(cx, |view, _, _| {
+        let conflict = view.store.as_ref().unwrap().conflict().unwrap();
+        assert!(String::from_utf8_lossy(&conflict.in_app).contains("In der App bearbeitet."));
+    });
+}
+
+#[gpui_kit::test]
+fn new_project_shortcut_can_return_to_the_previous_scene(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| {
+        view.select_scene(id, window, cx);
+        view.editor
+            .update(cx, |editor, cx| editor.focus(window, cx));
+    });
+    cx.simulate_keystrokes(
+        workspace.window,
+        if cfg!(target_os = "macos") {
+            "cmd-n"
+        } else {
+            "ctrl-n"
+        },
+    );
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.render_frame(cx);
+        let view = workspace.view.read(cx);
+        let title = ("input", view.title.entity_id());
+        let editor = ("input", view.editor.entity_id());
+        assert_eq!(
+            window.try_find(title).and_then(|input| input.focused()),
+            Some(true)
+        );
+        window.click("cancel", cx);
+        assert!(window.find(editor).visible());
+        assert_eq!(window.find(editor).focused(), Some(true));
+    })
+    .unwrap();
+    workspace.update(cx, |view, _, _| assert_eq!(view.selected_scene, Some(id)));
+}
+
+#[gpui_kit::test]
 fn project_picker_accepts_the_simulated_folder_response(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
