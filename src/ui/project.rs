@@ -12,7 +12,7 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
     ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
-    input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    input::{Input, InputEvent, InputState, TextDecoration, Textarea, TextareaState},
     scroll::ScrollableElement,
 };
 use gpui_kit::{prelude::FluentBuilder, *};
@@ -23,6 +23,7 @@ actions!(
 
 use writer::{
     Id, Project,
+    passage::SceneText,
     storage::{ConflictResolution, Store},
 };
 
@@ -64,7 +65,7 @@ pub struct ProjectView {
     last_version: Option<String>,
     last_export: Option<PathBuf>,
     scene_inspector: Option<SceneInspector>,
-    scene_text: Option<writer::passage::SceneText>,
+    scene_text: Option<SceneText>,
     scene_baseline: Option<writer::Document>,
     page: Page,
     event: Option<Id>,
@@ -415,6 +416,8 @@ impl ProjectView {
             cx.notify();
             return;
         }
+        self.editor
+            .update(cx, |editor, cx| apply_concept_decorations(editor, text, cx));
         let body = text.markdown();
         let staged = store
             .relative_path(document)
@@ -482,9 +485,10 @@ impl ProjectView {
         let Some(scene) = self.project.as_ref().and_then(|project| project.scene(id)) else {
             return;
         };
-        let text = writer::passage::SceneText::from_markdown(id, scene.body());
+        let text = SceneText::from_markdown(id, scene.body());
         self.editor.update(cx, |editor, cx| {
-            editor.set_value(text.text().to_owned(), window, cx)
+            editor.set_value(text.text().to_owned(), window, cx);
+            apply_concept_decorations(editor, &text, cx);
         });
         self.scene_text = Some(text);
         self.scene_inspector = None;
@@ -806,7 +810,7 @@ impl ProjectView {
                     .children(text.concepts().iter().map(|concept| {
                         div()
                             .border_l_2()
-                            .border_color(rgb(0xb98a37))
+                            .border_color(cx.theme().warning)
                             .pl_2()
                             .child(format!("Konzept · {}", &text.text()[concept.range.clone()]))
                     })),
@@ -1088,6 +1092,30 @@ impl Render for ProjectView {
                 content.child(div().flex_shrink_0().mt_2().child(error))
             })
     }
+}
+
+fn apply_concept_decorations(
+    editor: &mut TextareaState,
+    scene: &SceneText,
+    cx: &mut Context<TextareaState>,
+) {
+    let color = cx.theme().warning;
+    let style = HighlightStyle {
+        background_color: Some(color.opacity(0.16)),
+        underline: Some(UnderlineStyle {
+            color: Some(color),
+            thickness: px(1.),
+            wavy: false,
+        }),
+        ..Default::default()
+    };
+    let decorations = scene
+        .concepts()
+        .iter()
+        .filter(|concept| !concept.range.is_empty())
+        .map(|concept| TextDecoration::new(concept.range.clone(), style))
+        .collect();
+    editor.set_decorations(decorations, cx);
 }
 
 #[cfg(test)]

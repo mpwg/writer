@@ -292,6 +292,77 @@ fn native_key_dispatch_undoes_a_long_scene_edit_and_persists_the_previous_text(
 }
 
 #[gpui_kit::test]
+fn concept_decoration_survives_unicode_edit_undo_and_reopen(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let concept_id = Id::from_u128(0x00000000_0000_4000_8000_000000000008);
+    let path = workspace.root.join("Manuskript/Signal.md");
+    let original = format!(
+        "{}\n- Gewöhnliche Liste\n",
+        fs::read_to_string(&path).unwrap()
+    );
+    fs::write(&path, &original).unwrap();
+    let assert_range = |workspace: &TestWorkspace, cx: &mut TestAppContext, sentence: &str| {
+        workspace.update(cx, |view, _, cx| {
+            let editor = view.editor.read(cx);
+            assert_eq!(editor.decorations().len(), 1);
+            assert_eq!(editor.decorations()[0].range, 0..sentence.len());
+            assert_eq!(&editor.value()[..sentence.len()], sentence);
+        });
+    };
+
+    workspace.update(cx, |view, window, cx| {
+        view.refresh_project().unwrap();
+        view.select_scene(id, window, cx);
+    });
+    let old_sentence = "Eine Tür öffnet sich.";
+    assert_range(&workspace, cx, old_sentence);
+
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("preview", cx);
+        assert!(window.find("scene-preview").visible());
+    })
+    .unwrap();
+    workspace.update(cx, |view, window, cx| {
+        view.editor.update(cx, |editor, cx| {
+            editor.set_selected_range(5..9, cx);
+            editor.focus(window, cx);
+        });
+    });
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.input("Tu\u{308}re", cx)
+    })
+    .unwrap();
+    let edited_sentence = "Eine Tu\u{308}re öffnet sich.";
+    assert_range(&workspace, cx, edited_sentence);
+    workspace.update(cx, |view, _, cx| assert!(view.flush(cx)));
+
+    let reopened = Project::open(&workspace.root).unwrap();
+    let text = writer::passage::SceneText::from_markdown(id, reopened.scene(id).unwrap().body());
+    assert_eq!(text.concepts()[0].id, concept_id);
+    let preview = writer::export::preview_markdown(&text);
+    assert!(preview.contains(&format!("> **Konzept**\n>\n> {edited_sentence}")));
+    assert!(preview.lines().any(|line| line == "- Gewöhnliche Liste"));
+
+    cx.simulate_keystrokes(workspace.window, crate::editor_undo_shortcut());
+    assert_range(&workspace, cx, old_sentence);
+    workspace.update(cx, |view, _, cx| assert!(view.flush(cx)));
+    assert_eq!(fs::read_to_string(path).unwrap(), original);
+
+    let (window, fresh_view) = mount_view(cx, Some(&workspace.root));
+    cx.update_window(window, |_, window, cx| {
+        fresh_view.update(cx, |view, cx| view.select_scene(id, window, cx));
+        let editor = fresh_view.read(cx).editor.read(cx);
+        assert_eq!(editor.decorations().len(), 1);
+        assert_eq!(editor.decorations()[0].range, 0..old_sentence.len());
+        assert!(editor.value().starts_with(old_sentence));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn wide_scene_places_the_preview_next_to_the_editor(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
