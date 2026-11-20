@@ -20,7 +20,7 @@ Bei einer externen Änderung an der geöffneten Szene zeigte die App die beiden 
 Die 26 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen und die Antworten der Dateidialoge. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
 
 - Projektwahl, Neuanlage und erstes Tab-Ziel sowie Timeline-Netz, Ereignisliste, Verkettung, Zyklusdiagnose und Kapitelwechsel per Tastatur oder Ziehen.
-- Szeneneditor mit Umlauttext, Rückgängig-Kürzel, Autosave, Git-Version per Tastenkürzel und bestätigter Konfliktauflösung. Die simulierte IME-Komposition prüft, dass erst der bestätigte Text gespeichert wird.
+- Szeneneditor mit 900 Zeilen Umlauttext, Rückgängig-Kürzel, Autosave, Git-Version per Tastenkürzel und bestätigter Konfliktauflösung. Ein frisch aufgebautes GPUI-Fenster öffnet die gewählte Fassung erneut aus dem Projektordner. Die simulierte IME-Komposition prüft, dass erst der bestätigte Text gespeichert wird.
 - Szenenübergreifende Änderung mit Rückgängig, Markdown und PDF nach einem simulierten Dialog sowie Weltkartei mit Quellensprung und persistiertem Figurenwissen.
 - Codex-Ansichten mit Testdaten für Opt-out, Gespräch, Entwurf, Recherche, Detailvorschläge und Konsistenzentscheidungen.
 

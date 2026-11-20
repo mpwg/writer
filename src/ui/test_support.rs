@@ -58,9 +58,24 @@ fn open_workspace(cx: &mut TestAppContext, with_project: bool) -> TestWorkspace 
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let (window, view) = cx.update(|cx| {
+    cx.update(|cx| {
         init(cx);
         cx.bind_keys(crate::writer_key_bindings());
+    });
+    let (window, view) = mount_view(cx, with_project.then_some(root.as_path()));
+    TestWorkspace {
+        window,
+        view,
+        root,
+        _tmp: tmp,
+    }
+}
+
+fn mount_view(
+    cx: &mut TestAppContext,
+    project_root: Option<&Path>,
+) -> (AnyWindowHandle, Entity<ProjectView>) {
+    cx.update(|cx| {
         open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -73,22 +88,16 @@ fn open_workspace(cx: &mut TestAppContext, with_project: bool) -> TestWorkspace 
             |window, cx| {
                 cx.new(|cx| {
                     let mut view = ProjectView::new(window, cx);
-                    if with_project {
-                        view.project = Some(Project::open(&root).unwrap());
-                        view.store = Some(Store::new(&root).unwrap());
+                    if let Some(root) = project_root {
+                        view.project = Some(Project::open(root).unwrap());
+                        view.store = Some(Store::new(root).unwrap());
                     }
                     view
                 })
             },
         )
         .unwrap()
-    });
-    TestWorkspace {
-        window,
-        view,
-        root,
-        _tmp: tmp,
-    }
+    })
 }
 
 fn copy_project(source: &Path, target: &Path) {
@@ -128,28 +137,39 @@ fn project_picker_accepts_the_simulated_folder_response(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn native_key_dispatch_undoes_a_scene_edit_and_persists_the_previous_text(cx: &mut TestAppContext) {
+fn native_key_dispatch_undoes_a_long_scene_edit_and_persists_the_previous_text(
+    cx: &mut TestAppContext,
+) {
     use gpui_kit::test::TestWindowExt;
 
     let workspace = open(cx);
     let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
     let path = workspace.root.join("Manuskript/Signal.md");
     let original = fs::read(&path).unwrap();
+    let sample = "Über die Antenne hört Rüdiger ein Signal.\n".repeat(900);
     workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
     cx.update_window(workspace.window, |_, window, cx| {
         window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
-        window.input("Überprüfung", cx);
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(sample.clone()));
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-v"
+            } else {
+                "ctrl-v"
+            },
+            cx,
+        );
     })
     .unwrap();
     workspace.update(cx, |view, _, cx| {
-        assert!(view.editor.read(cx).value().contains("Überprüfung"));
+        assert!(view.editor.read(cx).value().contains(&sample));
         assert!(view.flush(cx));
     });
-    assert_ne!(fs::read(&path).unwrap(), original);
+    assert!(fs::read_to_string(&path).unwrap().contains(&sample));
 
     cx.simulate_keystrokes(workspace.window, crate::editor_undo_shortcut());
     workspace.update(cx, |view, _, cx| {
-        assert!(!view.editor.read(cx).value().contains("Überprüfung"));
+        assert!(!view.editor.read(cx).value().contains(&sample));
         assert!(view.flush(cx));
     });
     assert_eq!(fs::read(&path).unwrap(), original);
@@ -195,7 +215,7 @@ fn scene_composition_saves_only_after_the_input_method_commits(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-fn conflict_panel_loads_the_externally_edited_scene_on_confirmation(cx: &mut TestAppContext) {
+fn conflict_resolution_survives_reopening_the_book_in_a_new_view(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
     let workspace = open(cx);
@@ -223,6 +243,26 @@ fn conflict_panel_loads_the_externally_edited_scene_on_confirmation(cx: &mut Tes
         assert!(!view.editor.read(cx).value().contains("Interne Fassung."));
     });
     assert_eq!(fs::read_to_string(&path).unwrap(), external);
+
+    let (fresh_window, fresh_view) = mount_view(cx, None);
+    cx.update_window(workspace.window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.update_window(fresh_window, |_, window, cx| window.click("open", cx))
+        .unwrap();
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
+
+    cx.update_window(fresh_window, |_, window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{id}"), cx);
+        let editor = fresh_view.read(cx).editor.entity_id();
+        let observed = window.find(("input", editor));
+        let text = observed.value().unwrap();
+        assert!(text.contains("Externe Fassung."));
+        assert!(!text.contains("Interne Fassung."));
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]
