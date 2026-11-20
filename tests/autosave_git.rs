@@ -63,25 +63,53 @@ fn external_changes_require_an_explicit_resolution() {
     let root = folder.path();
     Project::create(root, "Buch").unwrap();
     let file = Path::new("Manuskript/Szene.md");
-    fs::write(root.join(file), "Ausgang").unwrap();
+    let document = |body| {
+        format!("---\nid: 00000000-0000-4000-8000-000000000007\nkind: scene\n---\n{body}")
+            .into_bytes()
+    };
+    fs::write(root.join(file), document("Ausgang")).unwrap();
     let mut first = Store::new(root).unwrap();
     let mut second = Store::new(root).unwrap();
     first
-        .stage(file, Some(b"Ausgang".to_vec()), b"Erste Fassung".to_vec())
+        .stage(file, Some(document("Ausgang")), document("Erste Fassung"))
         .unwrap();
     second
-        .stage(file, Some(b"Ausgang".to_vec()), b"Zweite Fassung".to_vec())
+        .stage(file, Some(document("Ausgang")), document("Zweite Fassung"))
         .unwrap();
     first.flush().unwrap();
     assert!(second.flush().is_err());
     let conflict = second.conflict().unwrap();
-    assert_eq!(
-        conflict.on_disk.as_deref(),
-        Some(b"Erste Fassung".as_slice())
-    );
-    assert_eq!(conflict.in_app, b"Zweite Fassung");
+    assert_eq!(conflict.on_disk, Some(document("Erste Fassung")));
+    assert_eq!(conflict.in_app, document("Zweite Fassung"));
     second
-        .resolve(ConflictResolution::Merged(b"Verbunden".to_vec()))
+        .resolve(ConflictResolution::Merged(document("Verbunden")))
         .unwrap();
-    assert_eq!(fs::read(root.join(file)).unwrap(), b"Verbunden");
+    assert_eq!(fs::read(root.join(file)).unwrap(), document("Verbunden"));
+}
+
+#[test]
+fn merged_document_must_keep_its_identity() {
+    let folder = tempdir().unwrap();
+    let root = folder.path();
+    Project::create(root, "Buch").unwrap();
+    let file = Path::new("Manuskript/Szene.md");
+    let path = root.join(file);
+    let document = |id, body| format!("---\nid: {id}\nkind: scene\n---\n{body}").into_bytes();
+    let id = "00000000-0000-4000-8000-000000000007";
+    let original = document(id, "Ausgang");
+    let internal = document(id, "Interne Fassung");
+    let external = document(id, "Externe Fassung");
+    fs::write(&path, &external).unwrap();
+    let mut store = Store::new(root).unwrap();
+    store.stage(file, Some(original), internal.clone()).unwrap();
+    assert!(store.flush().is_err());
+
+    let other_scene = document("00000000-0000-4000-8000-000000000077", "Falsche Szene");
+    assert!(
+        store
+            .resolve(ConflictResolution::Merged(other_scene))
+            .is_err()
+    );
+    assert_eq!(fs::read(path).unwrap(), external);
+    assert_eq!(store.conflict().unwrap().in_app, internal);
 }

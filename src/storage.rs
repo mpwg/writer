@@ -11,6 +11,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     Document, ProjectError, Result,
+    format::{Frontmatter, Manifest, split_document},
     project::{DIRECTORIES, MANIFEST, io_error},
     version,
 };
@@ -28,6 +29,40 @@ pub struct Conflict {
     pub path: PathBuf,
     pub on_disk: Option<Vec<u8>>,
     pub in_app: Vec<u8>,
+}
+
+impl Conflict {
+    pub fn validate_merge(&self, bytes: &[u8]) -> Result<()> {
+        let invalid = |reason: &str| storage_error(&self.path, reason);
+        let text = str::from_utf8(bytes).map_err(|error| storage_error(&self.path, error))?;
+        if self.path == Path::new(MANIFEST) {
+            let merged: Manifest =
+                serde_saphyr::from_str(text).map_err(|error| storage_error(&self.path, error))?;
+            let original: Manifest = serde_saphyr::from_slice(&self.in_app)
+                .map_err(|error| storage_error(&self.path, error))?;
+            if merged.id != original.id || merged.format_version != original.format_version {
+                return Err(invalid(
+                    "Buchkennung und Formatversion müssen erhalten bleiben",
+                ));
+            }
+        } else {
+            let metadata = |text: &str| -> Result<Frontmatter> {
+                let (yaml, _) = split_document(text)
+                    .ok_or_else(|| invalid("Die YAML-Metadaten müssen von --- umschlossen sein"))?;
+                serde_saphyr::from_str(yaml).map_err(|error| storage_error(&self.path, error))
+            };
+            let merged = metadata(text)?;
+            let original =
+                str::from_utf8(&self.in_app).map_err(|error| storage_error(&self.path, error))?;
+            let original = metadata(original)?;
+            if merged.id != original.id || merged.kind != original.kind {
+                return Err(invalid(
+                    "Dokumentkennung und Dokumenttyp müssen erhalten bleiben",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 pub enum ConflictResolution {
@@ -152,6 +187,9 @@ impl Store {
     }
 
     pub fn resolve(&mut self, resolution: ConflictResolution) -> Result<()> {
+        if let (Some(conflict), ConflictResolution::Merged(bytes)) = (&self.conflict, &resolution) {
+            conflict.validate_merge(bytes)?;
+        }
         let Some(conflict) = self.conflict.take() else {
             return Ok(());
         };
