@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
     Sizable,
     input::{Input, Textarea},
@@ -115,7 +116,7 @@ impl Render for OutlineDragPreview {
     }
 }
 
-fn drag_handle<T: 'static>(payload: T, id: String, title: &str) -> Stateful<Div> {
+fn drag_handle<T: 'static>(payload: T, id: String, title: &str) -> impl IntoElement {
     let title = title.to_owned();
     div()
         .id(id)
@@ -125,6 +126,7 @@ fn drag_handle<T: 'static>(payload: T, id: String, title: &str) -> Stateful<Div>
         .on_drag(payload, move |_, _, _, cx| {
             cx.new(|_| OutlineDragPreview(title.clone()))
         })
+        .test_support()
 }
 
 impl ProjectView {
@@ -679,6 +681,7 @@ impl ProjectView {
                                 })),
                         )
                 })
+                .test_support()
         };
         div()
             .flex()
@@ -816,7 +819,8 @@ impl ProjectView {
                                                     )
                                                 })),
                                         )
-                                    }),
+                                    })
+                                    .test_support(),
                             )
                             .children(chapter.scenes.iter().enumerate().filter_map(
                                 |(index, scene)| {
@@ -848,7 +852,8 @@ impl ProjectView {
                         outline
                             .unplaced_scenes()
                             .map(|scene| scene_line(scene.id, &scene.title, None, cx)),
-                    ),
+                    )
+                    .test_support(),
             )
     }
 
@@ -988,3 +993,7 @@ fn relation_label(kind: Relation) -> &'static str {
         Relation::Cause => "Verursacht",
     }
 }
+
+#[cfg(test)]
+#[path = "planning_tests.rs"]
+mod tests;

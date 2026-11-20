@@ -410,3 +410,137 @@ impl ProjectView {
             )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Page, test_support};
+    use gpui_kit::{
+        Focusable, TestAppContext,
+        test::{TestQueryExt, TestWindowExt},
+    };
+    use writer::{
+        DocumentKind, Id, Project,
+        knowledge::{Claim, ClaimHolder, ClaimState, Knowledge},
+    };
+
+    #[gpui_kit::test]
+    fn world_card_and_timed_belief_are_saved_to_the_project(cx: &mut TestAppContext) {
+        let workspace = test_support::open(cx);
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.click(("page", 4usize), cx))
+            .unwrap();
+        workspace.update(cx, |view, window, cx| {
+            view.world.title.update(cx, |input, cx| {
+                input.set_value("  Astrid  ", window, cx);
+            });
+            view.world.body.update(cx, |input, cx| {
+                input.set_value("Astrid hört das Funksignal.\n", window, cx);
+            });
+        });
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.click("character", cx))
+            .unwrap();
+
+        let project = Project::open(&workspace.root).unwrap();
+        let character = project
+            .documents()
+            .find(|document| document.title() == "Astrid")
+            .expect("die neue Figur muss auf der Platte liegen");
+        assert_eq!(character.kind(), DocumentKind::Character);
+        assert_eq!(character.body(), "Astrid hört das Funksignal.\n");
+        let character = character.id();
+        let event = "00000000-0000-4000-8000-000000000001"
+            .parse::<Id>()
+            .unwrap();
+
+        workspace.update(cx, |view, window, cx| {
+            view.world.claim.update(cx, |input, cx| {
+                input.set_value("Das Signal ist eine Warnung.", window, cx);
+            });
+        });
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click(format!("claim-event-{event}"), cx);
+                window.click("Glaubt", cx);
+            })
+            .unwrap();
+
+        let project = Project::open(&workspace.root).unwrap();
+        let knowledge = Knowledge::from_project(&project);
+        let belief = knowledge
+            .entries()
+            .find(|entry| entry.body.trim() == "Das Signal ist eine Warnung.")
+            .expect("die Aussage muss auf der Platte liegen");
+        assert_eq!(
+            belief.claim,
+            Some(Claim {
+                holder: ClaimHolder::Character(character),
+                state: ClaimState::Believes,
+                from: Some(event),
+            })
+        );
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.render_frame(cx);
+                let claim = window.find(format!("claim-{}", belief.id));
+                assert_eq!(
+                    claim.label().unwrap().trim(),
+                    "Erstkontakt · Glaubt · Das Signal ist eine Warnung."
+                );
+                window.click(format!("claim-{}", belief.id), cx);
+            })
+            .unwrap();
+        workspace.update(cx, |view, _, cx| {
+            assert_eq!(
+                view.world.body.read(cx).value().trim(),
+                "Das Signal ist eine Warnung."
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn world_source_search_opens_and_selects_the_matching_scene_passage(cx: &mut TestAppContext) {
+        let workspace = test_support::open(cx);
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.click(("page", 4usize), cx))
+            .unwrap();
+        workspace.update(cx, |view, window, cx| {
+            view.world.source_search.update(cx, |input, cx| {
+                input.set_value("  TÜR ÖFFNET  ", window, cx);
+            });
+        });
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click("source-search", cx);
+                window.render_frame(cx);
+                let result = window.find_by_label("Das Signal · Eine Tür öffnet sich.");
+                assert!(
+                    window
+                        .try_find_by_label("Der Start · Die Sonde startet.")
+                        .is_none()
+                );
+                window.click(result.path().last().unwrap().clone(), cx);
+            })
+            .unwrap();
+
+        workspace.update(cx, |view, window, cx| {
+            let scene = "00000000-0000-4000-8000-000000000007"
+                .parse::<Id>()
+                .unwrap();
+            assert!(view.page == Page::Scene);
+            assert_eq!(view.selected_scene, Some(scene));
+            let editor = view.editor.read(cx);
+            assert_eq!(
+                &editor.value()[editor.selected_range()],
+                "Eine Tür öffnet sich."
+            );
+            assert!(editor.focus_handle(cx).is_focused(window));
+        });
+    }
+}

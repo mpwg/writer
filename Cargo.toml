@@ -19,4 +19,5 @@ typst-assets = { version = "0.15.1", features = ["fonts"] }
 typst-as-lib = "0.18"
 
 [dev-dependencies]
+gpui-kit = { version = "0.10", features = ["test-support"] }
 pdf-extract = "0.12"

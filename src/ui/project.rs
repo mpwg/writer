@@ -14,7 +14,7 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
 };
 use gpui_kit::{prelude::FluentBuilder, *};
-actions!(writer_actions, [SaveProject]);
+actions!(writer_actions, [SaveProject, UndoScene]);
 
 use writer::{
     Id, Project,
@@ -32,6 +32,7 @@ enum Page {
 }
 
 pub struct ProjectView {
+    keyboard_focus: FocusHandle,
     title: Entity<InputState>,
     destination: Entity<InputState>,
     picked_destination: Option<PathBuf>,
@@ -79,11 +80,14 @@ impl ProjectView {
             },
         )
         .detach();
+        let keyboard_focus = cx.focus_handle().tab_stop(false);
+        window.focus(&keyboard_focus, cx);
         let view = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
             view.update(cx, |view, cx| view.flush(cx)).unwrap_or(true)
         });
         Self {
+            keyboard_focus,
             store: None,
             editor,
             merge: cx.new(|cx| TextareaState::new(window, cx).rows(8)),
@@ -690,7 +694,14 @@ impl ProjectView {
                         cx.notify();
                     })),
             )
-            .child(Textarea::new(&self.editor))
+            .child(
+                div()
+                    .key_context("WriterScene")
+                    .on_action(cx.listener(|view, _: &UndoScene, window, cx| {
+                        view.scene_action(None, None, window, cx)
+                    }))
+                    .child(Textarea::new(&self.editor).aria_label("Szenentext")),
+            )
             .child(self.scene_assistance(scene.id(), cx));
         let Some(text) = &self.scene_text else {
             return layout;
@@ -851,6 +862,7 @@ impl Render for ProjectView {
         let dark = cx.theme().is_dark();
         div()
             .id("workspace")
+            .track_focus(&self.keyboard_focus)
             .on_action(cx.listener(|view, _: &SaveProject, window, cx| view.checkpoint(window, cx)))
             .size_full()
             .overflow_y_scroll()
@@ -869,3 +881,7 @@ impl Render for ProjectView {
             })
     }
 }
+
+#[cfg(test)]
+#[path = "test_support.rs"]
+pub(super) mod test_support;

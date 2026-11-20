@@ -1881,3 +1881,7 @@ impl ProjectView {
             }))
     }
 }
+
+#[cfg(test)]
+#[path = "assistance_tests.rs"]
+mod tests;

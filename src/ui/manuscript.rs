@@ -344,3 +344,153 @@ impl ProjectView {
             }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support;
+    use gpui_kit::{Focusable, TestAppContext, test::TestWindowExt};
+    use std::time::Duration;
+    use writer::{Id, Project, outline::Outline};
+
+    const START: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000006);
+    const SIGNAL: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    const ERSTKONTAKT: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000001);
+
+    #[gpui_kit::test]
+    fn manuscript_replacement_and_undo_update_both_scene_files(cx: &mut TestAppContext) {
+        let workspace = test_support::open(cx);
+        let original = Project::open(&workspace.root).unwrap();
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click(("page", 3usize), cx);
+                window.render_frame(cx);
+                assert_eq!(window.find("replace-manuscript").disabled(), Some(true));
+                window.click(("chapter-jump", 1usize), cx);
+            })
+            .unwrap();
+        workspace.update(cx, |view, window, cx| {
+            let view = view.export_view.as_ref().unwrap();
+            assert!(
+                view.editors[&SIGNAL]
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
+            view.editors[&START].update(cx, |editor, cx| editor.set_selected_range(4..9, cx));
+            view.editors[&SIGNAL].update(cx, |editor, cx| {
+                editor.set_selected_range(0.."Eine Tür öffnet sich.".len(), cx);
+            });
+            view.replacement.update(cx, |editor, cx| {
+                editor.set_value("Fähre", window, cx);
+            });
+        });
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click(format!("replace-start-{START}"), cx);
+                window.click(format!("replace-end-{SIGNAL}"), cx);
+                window.click("replace-manuscript", cx);
+            })
+            .unwrap();
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+
+        let edited = Project::open(&workspace.root).unwrap();
+        assert_eq!(edited.scene(START).unwrap().body().trim(), "Die Fähre");
+        assert_eq!(
+            edited.scene(SIGNAL).unwrap().body(),
+            original
+                .scene(SIGNAL)
+                .unwrap()
+                .body()
+                .replace("Eine Tür öffnet sich.", "")
+        );
+        assert_eq!(
+            Outline::from_project(&edited).scene(SIGNAL).unwrap().event,
+            Some(ERSTKONTAKT)
+        );
+        workspace.update(cx, |view, _, cx| {
+            let editors = &view.export_view.as_ref().unwrap().editors;
+            assert_eq!(editors[&START].read(cx).value().as_ref(), "Die Fähre");
+            assert_eq!(
+                editors[&SIGNAL].read(cx).value().trim(),
+                "Danach verstummt die Antenne."
+            );
+        });
+
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.click("undo-manuscript", cx))
+            .unwrap();
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        let restored = Project::open(&workspace.root).unwrap();
+        for id in [START, SIGNAL] {
+            assert_eq!(
+                restored.scene(id).unwrap().body(),
+                original.scene(id).unwrap().body()
+            );
+        }
+    }
+
+    #[gpui_kit::test]
+    fn manuscript_exports_include_a_pending_editor_change(cx: &mut TestAppContext) {
+        let workspace = test_support::open(cx);
+        workspace
+            .window
+            .update(cx, |_, window, cx| {
+                window.click(("page", 3usize), cx);
+                window.click(("chapter-jump", 0usize), cx);
+            })
+            .unwrap();
+        workspace.update(cx, |view, _, cx| {
+            let editor = &view.export_view.as_ref().unwrap().editors[&START];
+            editor.update(cx, |editor, cx| editor.set_selected_range(4..9, cx));
+        });
+        workspace
+            .window
+            .update(cx, |_, window, cx| window.input("Fähre", cx))
+            .unwrap();
+        assert_eq!(
+            Project::open(&workspace.root)
+                .unwrap()
+                .scene(START)
+                .unwrap()
+                .body(),
+            "Die Sonde startet.\n"
+        );
+
+        for (button, name) in [("export-md", "Buch.md"), ("export-pdf", "Buch.pdf")] {
+            workspace
+                .window
+                .update(cx, |_, window, cx| window.click(button, cx))
+                .unwrap();
+            assert!(cx.did_prompt_for_new_path());
+            let output = workspace.root.join(name);
+            cx.simulate_new_path_selection(|directory| {
+                assert_eq!(directory, workspace.root);
+                Some(output.clone())
+            });
+            cx.run_until_parked();
+            workspace
+                .window
+                .update(cx, |_, window, cx| {
+                    window.render_frame(cx);
+                    let expected = format!("Datei öffnen · {name}");
+                    assert_eq!(window.find("show-export").label(), Some(expected.as_str()));
+                })
+                .unwrap();
+            let content = if name.ends_with(".md") {
+                std::fs::read_to_string(output).unwrap()
+            } else {
+                pdf_extract::extract_text(output).unwrap()
+            };
+            assert!(content.contains("Die Fähre startet."), "{content}");
+            assert!(
+                content.contains("Danach verstummt die Antenne."),
+                "{content}"
+            );
+        }
+    }
+}

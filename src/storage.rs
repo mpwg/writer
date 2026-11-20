@@ -214,6 +214,12 @@ impl Store {
                 });
             })?;
             if current.as_deref() != Some(change.bytes.as_slice()) {
+                if current.is_none()
+                    && let Some(parent) = path.parent()
+                {
+                    // Git checkouts omit managed directories until they contain a file.
+                    fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+                }
                 write_atomic(&path, &change.bytes, current.as_deref())?;
             }
             let relative = relative.clone();
