@@ -374,3 +374,105 @@ fn consistency_review_saves_the_reason_and_hides_the_dismissed_finding(cx: &mut 
     assert_eq!(review.decisions().len(), 1);
     assert_eq!(review.decisions()[0].reason.as_deref(), Some(reason));
 }
+
+#[path = "../../tests/support/app_server.rs"]
+mod app_server;
+
+#[gpui_kit::test]
+fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppContext) {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let workspace = test_support::open(cx);
+    let home = tempfile::tempdir().unwrap();
+    let preferences = AiPreferences::at(home.path().into());
+    let project = Project::open(&workspace.root).unwrap();
+    let timeline = Timeline::from_project(&project);
+    let event = |title: &str| {
+        timeline
+            .ordered_events()
+            .into_iter()
+            .find(|event| event.title == title)
+            .unwrap()
+            .id
+    };
+    let pair = [event("Erstkontakt"), event("Aufbruch")];
+
+    workspace.update(cx, |view, _, _| {
+        view.ai.session = AiSession::with_preferences(&preferences);
+        view.ai.preferences = Some(preferences);
+        view.ai.cli = Some(app_server::mock_executable().into());
+    });
+
+    fn wait_for(cx: &mut TestAppContext, mut predicate: impl FnMut(&mut TestAppContext) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !predicate(cx) {
+            assert!(
+                Instant::now() < deadline,
+                "Zeitüberschreitung beim lokalen Protokolltest"
+            );
+            cx.executor().advance_clock(Duration::from_millis(180));
+            cx.run_until_parked();
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 5_usize), cx);
+        window.click("enable-codex", cx);
+    });
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai.session.status() == &AiStatus::SignInRequired
+        })
+    });
+    codex_window(cx, &workspace, |window, cx| window.click("login", cx));
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai.session.status() == &AiStatus::Ready
+        })
+    });
+
+    let prompt = "Was sieht die Figur? Der Leuchtturm ist dunkel.";
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(format!("brainstorm-first-{}", pair[0]), cx);
+        window.click(format!("brainstorm-second-{}", pair[1]), cx);
+        let id = workspace.view.read(cx).ai.input.entity_id();
+        window.click(("input", id), cx);
+        window.input(prompt, cx);
+        assert_ne!(window.find("send-chat").disabled(), Some(true));
+        window.click("send-chat", cx);
+    });
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai
+                .brainstorm
+                .as_ref()
+                .unwrap()
+                .messages()
+                .iter()
+                .any(|message| message.role == Role::Codex)
+        })
+    });
+
+    let reopened = Project::open(&workspace.root).unwrap();
+    let chat = Brainstorm::open(&reopened, pair).unwrap();
+    assert_eq!(
+        chat.messages()
+            .iter()
+            .map(|message| (message.role, message.text.as_str()))
+            .collect::<Vec<_>>(),
+        [(Role::Author, prompt), (Role::Codex, "Die Küste.")]
+    );
+    assert_eq!(Timeline::from_project(&reopened).ordered_events().len(), 3);
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("enable-codex", cx);
+        assert_eq!(window.find("send-chat").disabled(), Some(true));
+    });
+    workspace.update(cx, |view, _, _| {
+        assert_eq!(view.ai.session.status(), &AiStatus::Disabled)
+    });
+}
