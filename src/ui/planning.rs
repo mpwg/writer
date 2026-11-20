@@ -1607,8 +1607,9 @@ impl ProjectView {
                     .child(
                         div()
                             .id("outline-scene-position")
-                            .child(placement)
-                            .test_support(),
+                            .test_support()
+                            .aria_label(placement.clone())
+                            .child(placement),
                     ),
             )
             .child(

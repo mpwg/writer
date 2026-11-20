@@ -1,4 +1,4 @@
-use crate::ui::project::test_support::{TestWorkspace, open};
+use crate::ui::project::test_support::{TestWorkspace, mount_view, open};
 use gpui_kit::{App, ElementId, EntityId, TestAppContext, Window, test::TestWindowExt as _};
 use writer::{
     Id, Project,
@@ -284,12 +284,14 @@ fn timeline_reports_cycle_without_changing_the_saved_relations(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-fn timeline_opens_the_scene_derived_from_an_event(cx: &mut TestAppContext) {
+fn derived_scene_keeps_its_event_when_placed_from_the_outline(cx: &mut TestAppContext) {
     let workspace = open(cx);
     interact(&workspace, cx, |window, cx| {
         window.click(format!("event-{FIRST_EVENT}"), cx);
         window.click("derive-scene", cx);
-        assert!(window.find("confirm-derived-scene").visible());
+        let view = workspace.view.read(cx);
+        let form = view.planning.derived.as_ref().unwrap();
+        enter_text(window, form.title.entity_id(), "Das Signal", cx);
         window.click("confirm-derived-scene", cx);
         window.click("open-derived-scene", cx);
         assert!(window.find("scene-details").visible());
@@ -300,11 +302,80 @@ fn timeline_opens_the_scene_derived_from_an_event(cx: &mut TestAppContext) {
         .unplaced_scenes()
         .find(|scene| scene.event == Some(FIRST_EVENT))
         .expect("die abgeleitete Szene muss auf der Festplatte gespeichert sein");
-    assert_eq!(scene.title, "Die Station fängt ein Signal auf.");
+    assert_eq!(scene.title, "Das Signal");
     assert_eq!(
         scene.bullets.trim_end(),
         "Die Station fängt ein Signal auf."
     );
+    let scene_id = scene.id;
+    workspace.update(cx, |view, _, _| {
+        assert_eq!(view.selected_scene, Some(scene_id))
+    });
+
+    let title = workspace.update(cx, |view, _, _| view.chapter_title.entity_id());
+    interact(&workspace, cx, |window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click("new-chapter", cx);
+        enter_text(window, title, "Die Rückkehr", cx);
+        window.click("chapter-add", cx);
+        window.right_click(format!("scene-{scene_id}"), cx);
+    });
+    interact(&workspace, cx, |window, cx| {
+        assert!(window.find("popup-menu").visible());
+        for _ in 0..3 {
+            window.press("down", cx);
+        }
+        window.press("enter", cx);
+    });
+    let outline = Outline::from_project(&reopen(&workspace));
+    let chapter = &outline.chapters()[2];
+    assert_eq!(chapter.title, "Die Rückkehr");
+    assert_eq!(chapter.scenes, [scene_id]);
+    let chapter_id = chapter.id;
+
+    interact(&workspace, cx, |window, _| window.remove_window());
+    let (window, _) = mount_view(cx, None);
+    window
+        .update(cx, |_, window, cx| window.click("open", cx))
+        .unwrap();
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
+
+    window
+        .update(cx, |_, window, cx| {
+            window.click(("page", 1_usize), cx);
+            window.click(format!("scene-{scene_id}"), cx);
+            assert_eq!(
+                window.find("outline-scene-position").label(),
+                Some("Kapitel 3 · Die Rückkehr\nSzene 1")
+            );
+            assert_eq!(
+                window
+                    .find(format!("outline-timeline-event-{FIRST_EVENT}"))
+                    .label(),
+                Some("Erstkontakt")
+            );
+
+            window.drag_to(format!("drag-scene-{scene_id}"), "unplaced-scenes", cx);
+            assert_eq!(
+                window.find("outline-scene-position").label(),
+                Some("Ohne Kapitel")
+            );
+            window.drag_to(
+                format!("drag-scene-{scene_id}"),
+                format!("chapter-row-{chapter_id}"),
+                cx,
+            );
+            assert_eq!(
+                window.find("outline-scene-position").label(),
+                Some("Kapitel 3 · Die Rückkehr\nSzene 1")
+            );
+        })
+        .unwrap();
+    let dragged = Outline::from_project(&reopen(&workspace));
+    assert_eq!(dragged.chapters()[2].scenes, chapter.scenes);
+    assert_eq!(dragged.scene(scene_id).unwrap().event, Some(FIRST_EVENT));
 }
 
 #[gpui_kit::test]

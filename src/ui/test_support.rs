@@ -62,7 +62,7 @@ fn open_workspace(cx: &mut TestAppContext, with_project: bool) -> TestWorkspace 
     }
 }
 
-fn mount_view(
+pub(super) fn mount_view(
     cx: &mut TestAppContext,
     project_root: Option<&Path>,
 ) -> (AnyWindowHandle, Entity<ProjectView>) {
