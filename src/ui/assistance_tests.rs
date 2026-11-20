@@ -166,19 +166,23 @@ fn brainstorm_promotes_only_the_selected_passage_with_the_chosen_link(cx: &mut T
 fn scene_applies_only_the_marked_part_of_a_canned_draft(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     cx.simulate_window_resize(workspace.window, size(px(1440.), px(1600.)));
+    let path = workspace.root.join("Manuskript/Signal.md");
+    let original = "- Tür öffnen\n- Leise eintreten";
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(path, source.replace("Eine Tür öffnet sich.", original)).unwrap();
     let project = Project::open(&workspace.root).unwrap();
     let scene = project
         .scenes()
         .find(|scene| scene.title() == "Das Signal")
         .unwrap();
     let id = scene.id();
-    let original = "Eine Tür öffnet sich.";
     let selected_reply = "Das Schott öffnete sich lautlos.";
     let full_reply = format!("{selected_reply} Der Suchtrupp kehrte zurück.");
     let text = SceneText::from_markdown(id, scene.body());
     let anchor = text.anchor(0..original.len()).unwrap();
     assert_eq!(anchor.quote(), original);
     workspace.update(cx, |view, window, cx| {
+        view.refresh_project().unwrap();
         view.select_scene(id, window, cx);
         view.complete_ai(
             Pending::Draft {
@@ -222,6 +226,79 @@ fn scene_applies_only_the_marked_part_of_a_canned_draft(cx: &mut TestAppContext)
     assert_eq!(
         &saved.text()[saved.concepts()[0].range.clone()],
         selected_reply
+    );
+    assert_eq!(Knowledge::from_project(&project).entries().count(), 0);
+}
+
+#[gpui_kit::test]
+fn late_scene_draft_requires_a_new_selection_for_a_duplicated_target(cx: &mut TestAppContext) {
+    let workspace = test_support::open(cx);
+    let scene = writer::Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let home = tempfile::tempdir().unwrap();
+    enable_fixture(cx, &workspace, home.path());
+    let quote = "Eine Tür öffnet sich.";
+    let inserted = "Das Schott gab lautlos nach.";
+    let original = workspace.update(cx, |view, window, cx| {
+        view.select_scene(scene, window, cx);
+        view.editor.update(cx, |editor, cx| {
+            editor.set_selected_range(0..quote.len(), cx);
+            editor.value().to_string()
+        })
+    });
+    codex_window(cx, &workspace, |window, cx| window.click("start-draft", cx));
+    let request = home.path().join("codex/draft-request");
+    wait_for(cx, |_| request.exists());
+
+    let duplicated = format!("Ein neuer Absatz.\n\n{original}\n{original}");
+    workspace.update(cx, |view, window, cx| {
+        view.editor.update(cx, |editor, cx| {
+            editor.set_selected_range(0..original.len(), cx);
+            editor.focus(window, cx);
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| window.input(&duplicated, cx));
+    let response = home.path().join("codex/draft-response");
+    let temporary = response.with_extension("tmp");
+    std::fs::write(&temporary, format!("{inserted} Der übrige Entwurf.")).unwrap();
+    std::fs::rename(temporary, response).unwrap();
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| view.ai.draft.is_some())
+    });
+    workspace.update(cx, |view, _, cx| {
+        view.ai.answer.update(cx, |answer, cx| {
+            answer.set_selected_range(0..inserted.len(), cx)
+        });
+    });
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("accept-draft").disabled(), Some(true));
+        window.click("choose-draft-target", cx);
+        window.click("accept-draft-at-selection", cx);
+    });
+    workspace.update(cx, |view, _, cx| {
+        assert_eq!(view.editor.read(cx).value(), duplicated)
+    });
+
+    let second = duplicated.rfind(quote).unwrap();
+    workspace.update(cx, |view, _, cx| {
+        view.editor.update(cx, |editor, cx| {
+            editor.set_selected_range(second..second + quote.len(), cx)
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("accept-draft-at-selection", cx)
+    });
+    workspace.update(cx, |view, _, cx| assert!(view.flush(cx)));
+    let project = Project::open(&workspace.root).unwrap();
+    let saved = SceneText::from_markdown(scene, project.scene(scene).unwrap().body());
+    assert_eq!(
+        saved.text(),
+        format!(
+            "{}{inserted}{}",
+            &duplicated[..second],
+            &duplicated[second + quote.len()..]
+        )
     );
 }
 
@@ -386,7 +463,7 @@ fn detail_suggestions_trigger_on_leave_and_stay_with_the_edited_scene(cx: &mut T
         {"quote": "Eine Tür öffnet sich.", "target": target, "text": "Eine Tür geht auf."},
         {"quote": "Danach verstummt die Antenne.", "target": target, "text": "Die Antenne schweigt."}
     ]).to_string();
-    let response_path = home.path().join("codex/detail-response.json");
+    let response_path = home.path().join("codex/detail-response");
     let pending_response = response_path.with_extension("tmp");
     std::fs::write(&pending_response, response).unwrap();
     std::fs::rename(pending_response, response_path).unwrap();

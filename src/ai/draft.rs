@@ -98,10 +98,22 @@ impl Draft {
     }
 
     pub fn accept(&self, excerpt: &str, scene: &mut SceneText) -> Result<(), DraftError> {
+        self.accept_at(excerpt, &self.target, scene)
+    }
+
+    pub fn accept_at(
+        &self,
+        excerpt: &str,
+        target: &Anchor,
+        scene: &mut SceneText,
+    ) -> Result<(), DraftError> {
         if excerpt.trim().is_empty() || !self.text.contains(excerpt) {
             return Err(DraftError::UnknownExcerpt);
         }
-        scene.replace(&self.target, excerpt)?;
+        if target.document_id() != self.target.document_id() {
+            return Err(TextError::WrongDocument.into());
+        }
+        scene.replace(target, excerpt)?;
         Ok(())
     }
 }

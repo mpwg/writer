@@ -168,6 +168,7 @@ pub(super) struct Assistance {
     show_decisions: bool,
     explaining_finding: Option<usize>,
     draft: Option<Draft>,
+    choosing_draft_target: bool,
     draft_thread: Option<(Id, String)>,
     details: DetailQueue,
     delayed_details: BTreeMap<Id, SceneText>,
@@ -209,6 +210,7 @@ impl Assistance {
             show_decisions: false,
             explaining_finding: None,
             draft: None,
+            choosing_draft_target: false,
             draft_thread: None,
             details: DetailQueue::default(),
             delayed_details: BTreeMap::new(),
@@ -228,6 +230,7 @@ impl Assistance {
         self.explaining_finding = None;
         self.settings_origin = None;
         self.draft = None;
+        self.choosing_draft_target = false;
         self.draft_thread = None;
         for field in [
             &self.input,
@@ -529,6 +532,7 @@ impl ProjectView {
                     .answer
                     .update(cx, |answer, cx| answer.set_value(text.clone(), window, cx));
                 self.ai.draft = Some(draft);
+                self.ai.choosing_draft_target = false;
             }
             Pending::Detail { scene, snapshot } => {
                 let Some(project) = &self.project else { return };
@@ -1028,6 +1032,7 @@ impl ProjectView {
     }
 
     pub(super) fn scene_opened(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ai.choosing_draft_target = false;
         if let Some((id, text)) = self.selected_scene.zip(self.scene_text.as_ref()) {
             self.ai.details.open(id, scene_revision(text));
             self.ai.draft = self
@@ -1229,6 +1234,16 @@ impl ProjectView {
         );
     }
 
+    fn choose_draft_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ai.choosing_draft_target = true;
+        self.editor.update(cx, |editor, cx| {
+            let cursor = editor.selected_range().end;
+            editor.set_selected_range(cursor..cursor, cx);
+            editor.focus(window, cx);
+        });
+        cx.notify();
+    }
+
     fn accept_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.flush(cx) {
             return;
@@ -1237,9 +1252,28 @@ impl ProjectView {
             return;
         };
         let answer = self.ai.answer.read(cx).selected_text().to_string();
-        match draft.accept(&answer, scene) {
+        let result = if self.ai.choosing_draft_target {
+            let selected = self.editor.read(cx).selected_range();
+            if selected.is_empty() {
+                self.ai.messages.insert(
+                    Activity::Scene,
+                    "Markiere die neue Zielpassage im Szenentext.".into(),
+                );
+                cx.notify();
+                return;
+            }
+            scene
+                .anchor(selected)
+                .map_err(Into::into)
+                .and_then(|target| draft.accept_at(&answer, &target, scene))
+        } else {
+            draft.accept(&answer, scene)
+        };
+        match result {
             Ok(()) => {
                 let text = scene.text().to_owned();
+                self.ai.choosing_draft_target = false;
+                self.ai.messages.remove(&Activity::Scene);
                 self.editor
                     .update(cx, |editor, cx| editor.replace_all(text, window, cx));
                 self.stage_editor(window, cx);
@@ -2568,16 +2602,48 @@ impl ProjectView {
             )
             .children(self.ai_setup_action(cx))
             .child(self.ai_activity(Activity::Scene, cx))
-            .when_some(draft_here, |pane, _| {
+            .when_some(draft_here, |pane, draft| {
+                let target_unavailable = self
+                    .scene_text
+                    .as_ref()
+                    .is_some_and(|text| text.resolve(draft.target()).is_err());
                 pane.child("Entwurf")
                     .child(Textarea::new(&self.ai.answer).readonly(true))
                     .child(
                         Button::new("accept-draft")
                             .primary()
                             .label("Markierten Ausschnitt übernehmen")
+                            .disabled(target_unavailable || self.ai.choosing_draft_target)
                             .on_click(
                                 cx.listener(|view, _, window, cx| view.accept_draft(window, cx)),
                             ),
+                    )
+                    .when(
+                        target_unavailable || self.ai.choosing_draft_target,
+                        |pane| {
+                            pane.child("Ursprüngliche Zielpassage")
+                                .child(draft.target().quote().to_owned())
+                                .when(!self.ai.choosing_draft_target, |pane| {
+                                    pane.child(
+                                        Button::new("choose-draft-target")
+                                            .label("Zielpassage neu auswählen")
+                                            .on_click(cx.listener(|view, _, window, cx| {
+                                                view.choose_draft_target(window, cx)
+                                            })),
+                                    )
+                                })
+                                .when(self.ai.choosing_draft_target, |pane| {
+                                    pane.child("Markiere die neue Zielpassage im Szenentext.")
+                                        .child(
+                                            Button::new("accept-draft-at-selection")
+                                                .primary()
+                                                .label("In neue Auswahl übernehmen")
+                                                .on_click(cx.listener(|view, _, window, cx| {
+                                                    view.accept_draft(window, cx)
+                                                })),
+                                        )
+                                })
+                        },
                     )
                     .child("Antwort auf Rückfrage oder Anweisung zur Überarbeitung")
                     .child(Textarea::new(&self.ai.input))

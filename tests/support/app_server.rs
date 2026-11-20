@@ -47,6 +47,18 @@ fn response(id: &str, result: &str) {
     println!("{{\"id\":{id},\"result\":{result}}}");
 }
 
+fn reply_from_file(codex_home: &std::path::Path, kind: &str, turn: &str, request: &str) {
+    fs::write(codex_home.join(format!("{kind}-request")), request).unwrap();
+    let answer = codex_home.join(format!("{kind}-response"));
+    let start = std::time::Instant::now();
+    while !answer.exists() {
+        assert!(start.elapsed() < Duration::from_secs(10), "missing {kind} fixture response");
+        thread::sleep(Duration::from_millis(5));
+    }
+    let reply = fs::read_to_string(answer).unwrap();
+    event("turn/completed", &format!(r#"{{"threadId":"thread-valid","turn":{{"id":"{turn}","status":"completed","items":[{{"type":"agentMessage","id":"fixture-answer","text":{reply:?},"phase":"final_answer"}}],"error":null}}}}"#));
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     for argument in ["app-server", "stdio://", "features.shell_tool=false",
@@ -124,15 +136,11 @@ fn main() {
                 response(id, &format!(r#"{{"turn":{{"id":"{turn_id}","status":"inProgress","items":[],"error":null}}}}"#));
                 if line.contains("Finde belegte Ergänzungen für bestehende Zielnotizen") {
                     assert_eq!(turn_count, 1, "repeated detail request for an unchanged scene");
-                    fs::write(codex_home.join("detail-request"), &line).unwrap();
-                    let response_file = codex_home.join("detail-response.json");
-                    let start = std::time::Instant::now();
-                    while !response_file.exists() {
-                        assert!(start.elapsed() < Duration::from_secs(10), "missing detail fixture response");
-                        thread::sleep(Duration::from_millis(5));
-                    }
-                    let reply = fs::read_to_string(response_file).unwrap();
-                    event("turn/completed", &format!(r#"{{"threadId":"thread-valid","turn":{{"id":"{turn_id}","status":"completed","items":[{{"type":"agentMessage","id":"detail","text":{reply:?},"phase":"final_answer"}}],"error":null}}}}"#));
+                    reply_from_file(&codex_home, "detail", turn_id, &line);
+                    continue;
+                }
+                if line.contains("Formuliere die Auswahl als Prosa aus") {
+                    reply_from_file(&codex_home, "draft", turn_id, &line);
                     continue;
                 }
                 if line.contains("Späte Antwort") {
