@@ -534,11 +534,17 @@ fn research_from_the_scene_preserves_chronology_and_links_each_passage(cx: &mut 
 }
 
 #[gpui_kit::test]
-fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut TestAppContext) {
+fn writing_and_export_remain_available_when_codex_is_missing(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     let settings_dir = tempfile::tempdir().unwrap();
     let preferences = AiPreferences::at(settings_dir.path().to_path_buf());
-    let project_id = Project::open(&workspace.root).unwrap().id();
+    let project = Project::open(&workspace.root).unwrap();
+    let project_id = project.id();
+    let start = project
+        .scenes()
+        .find(|scene| scene.title() == "Der Start")
+        .unwrap();
+    let edited_text = "Die Fähre verlässt den Hafen.";
     assert!(project_id.is_some());
     workspace.update(cx, |view, _, _| {
         view.ai.session = AiSession::with_preferences(&preferences);
@@ -562,8 +568,54 @@ fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut 
         assert!(window.try_find("login-browser").is_none());
     });
     assert!(preferences.is_enabled(&workspace.root, project_id).unwrap());
+    workspace.update(cx, |view, _, _| {
+        assert_eq!(
+            view.ai.session.status(),
+            &AiStatus::Unavailable(writer::ai::AiError::MissingCli)
+        );
+    });
 
     codex_window(cx, &workspace, |window, cx| {
+        window.click("close-settings", cx);
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{}", start.id()), cx);
+        window.click("outline-edit-scene", cx);
+        let editor = workspace.view.read(cx).editor.entity_id();
+        window.click(("input", editor), cx);
+        window.press("secondary-a", cx);
+        window.input(edited_text, cx);
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 3_usize), cx);
+        window.click("manuscript-export", cx);
+    });
+
+    for (button, name) in [("export-md", "Buch.md"), ("export-pdf", "Buch.pdf")] {
+        codex_window(cx, &workspace, |window, cx| window.click(button, cx));
+        assert!(cx.did_prompt_for_new_path());
+        let output = settings_dir.path().join(name);
+        cx.simulate_new_path_selection(|_| Some(output.clone()));
+        cx.run_until_parked();
+        let exported = if name.ends_with(".md") {
+            std::fs::read_to_string(output).unwrap()
+        } else {
+            pdf_extract::extract_text(output).unwrap()
+        };
+        assert!(exported.contains(edited_text));
+        assert!(exported.contains("Konzept"));
+    }
+    let saved = Project::open(&workspace.root).unwrap();
+    assert_eq!(
+        saved.scene(start.id()).unwrap().body().trim_end(),
+        edited_text
+    );
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 6_usize), cx);
+        assert_eq!(window.find("check-consistency").disabled(), Some(true));
+        window.click("ai-settings", cx);
+        assert_eq!(window.find("enable-codex").checked(), Some(true));
+        assert!(window.find("retry-connection").visible());
         window.click("enable-codex", cx);
         assert_eq!(window.find("enable-codex").checked(), Some(false));
         assert!(window.try_find("retry-connection").is_none());
