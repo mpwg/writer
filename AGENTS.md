@@ -11,7 +11,7 @@
 
 ## Entwicklung und Versionen
 
-- Verwende für Cargo-Abhängigkeiten explizite Caret-Versionsanforderungen wie `^1.2.3`, damit kompatible Aktualisierungen möglich bleiben.
+- Gib bei Cargo-Abhängigkeiten die tatsächlich benötigte Mindestversion an und lass das optionale `^` weg, zum Beispiel `"1.2.3"`.
 
 - Nutze `test-driven-development` für Features, Fehlerbehebungen, Refactorings und Verhaltensänderungen. Schreibe zuerst einen Test und prüfe, dass er aus dem erwarteten Grund fehlschlägt. Implementiere die kleinste passende Änderung, prüfe den erfolgreichen Testlauf und räume bei Bedarf auf. Führe vor dem Abschluss die vollständige Testsuite aus und benenne etwaige Fehlschläge.
 - Verwende die jeweils neuesten stabilen Versionen der Entwicklungswerkzeuge, der Rust-Toolchain und der Abhängigkeiten. Prüfe die verfügbaren Versionen beim Einrichten und bei Aktualisierungen anhand der offiziellen Veröffentlichungen oder Paketregister. Prüfe nach Aktualisierungen den Build und die Tests.
