@@ -11,7 +11,11 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. Der Dateikonflikt wird mit zwei getrennten Store-Instanzen erzeugt und durch die bestätigte Zusammenführung aufgelöst. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler. Der macOS-Linker meldet im Testprofil eine Unwind-Warnung. Tests und Release-Build wurden erfolgreich beendet.
 
-Noch offen im praktischen macOS-Durchlauf sind der komplette Drag-and-drop-Ablauf, Tastaturbedienung und Eingabemethoden über alle Ansichten sowie die Konfliktauflösung im Fenster. Die zugehörigen Fachpfade sind automatisiert geprüft.
+Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
+
+Bei einer externen Änderung an der geöffneten Szene zeigte die App die beiden Fassungen an. „Auf Festplatte übernehmen“ lud die externe Fassung in den Editor. `⌘S` erstellte genau einen lokalen Git-Commit mit dieser Fassung. Der Text im Git-Commit entsprach der Datei bytegenau.
+
+Noch offen im praktischen macOS-Durchlauf sind die vollständige Tastaturnavigation und zusätzliche Eingabemethoden über alle Ansichten.
 
 ## Codex
 
