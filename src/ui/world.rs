@@ -568,9 +568,13 @@ impl ProjectView {
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().min_w_0().flex_1().child(
-                        Input::new(&self.world.source_search).aria_label("Textstelle suchen"),
-                    ))
+                    .child(
+                        div().min_w_0().flex_1().child(
+                            Input::new(&self.world.source_search)
+                                .id("world-source-search")
+                                .aria_label("Textstelle suchen"),
+                        ),
+                    )
                     .child(
                         Button::new("source-search")
                             .label("Suchen")
@@ -937,29 +941,19 @@ mod tests {
             .window
             .update(cx, |_, window, cx| {
                 window.click(("page", 4usize), cx);
+                window.click("world-source-search", cx);
+                window.input("Tür öffnet", cx);
+                window.press("tab", cx);
+                assert_eq!(window.find("source-search").focused(), Some(true));
+                window.press("enter", cx);
             })
-            .unwrap();
-        workspace.update(cx, |view, window, cx| {
-            view.world.source_search.update(cx, |input, cx| {
-                input.set_value("Tür öffnet", window, cx);
-            });
-        });
-        workspace
-            .window
-            .update(cx, |_, window, cx| window.click("source-search", cx))
             .unwrap();
         fs::write(&path, format!("{metadata}\n---\n{prefix}{body}")).unwrap();
 
-        workspace.update(cx, |view, window, cx| {
-            view.world
-                .source_search
-                .update(cx, |input, cx| input.focus(window, cx));
-        });
         workspace
             .window
             .update(cx, |_, window, cx| {
                 let result = window.find_by_label("Das Signal · Eine Tür öffnet sich.");
-                window.press("tab", cx);
                 window.press("tab", cx);
                 assert_eq!(
                     window.find(result.path().last().unwrap().clone()).focused(),

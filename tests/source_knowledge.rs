@@ -4,10 +4,11 @@ use writer::{
     DocumentKind, Id, Project,
     ai::brainstorm::{Brainstorm, IdeaPart, Role},
     knowledge::{Claim, ClaimHolder, ClaimState, Knowledge, KnowledgeKind},
+    outline::Outline,
     passage::SceneText,
     sources::{Resolution, SourceForm, Sources},
     storage::Store,
-    timeline::{Relation, Timeline},
+    timeline::{Relation, TemporalOrder, Timeline},
 };
 
 fn write_document(root: &Path, path: &str, id: Id, kind: &str, yaml: &str, body: &str) {
@@ -94,7 +95,7 @@ fn distinguishes_ordinary_bullets_from_a_concept_written_as_prose() {
 }
 
 #[test]
-fn figure_knowledge_begins_at_the_claim_event_and_survives_reopening() {
+fn later_revelation_is_only_author_knowledge_in_the_earlier_scene() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("Buch");
     let project = Project::create(&path, "Testbuch").unwrap();
@@ -107,10 +108,11 @@ fn figure_knowledge_begins_at_the_claim_event_and_survives_reopening() {
         .unwrap();
     let mut knowledge = Knowledge::from_project(&project);
     let character = knowledge.create(KnowledgeKind::Character, "Hüterin", "", None);
+    let revelation = "Der Schlüssel liegt im Brunnen.";
     let author = knowledge.create(
         KnowledgeKind::Concept,
         "Das Versteck",
-        "Der Schlüssel liegt im Brunnen.",
+        revelation,
         Some(Claim {
             holder: ClaimHolder::Author,
             state: ClaimState::Knows,
@@ -120,39 +122,80 @@ fn figure_knowledge_begins_at_the_claim_event_and_survives_reopening() {
     let figure = knowledge.create(
         KnowledgeKind::Concept,
         "Fund der Hüterin",
-        "Sie hält den Schlüssel für echt.",
+        revelation,
         Some(Claim {
             holder: ClaimHolder::Character(character),
-            state: ClaimState::Believes,
+            state: ClaimState::Knows,
             from: Some(when_known),
         }),
     );
     let mut store = Store::new(&path).unwrap();
+    for event in [before, when_known, elsewhere] {
+        timeline.stage_event(event, &project, &mut store).unwrap();
+    }
     knowledge.stage_changes(&project, &mut store).unwrap();
     store.flush().unwrap();
-    let knowledge = Knowledge::from_project(&Project::open(&path).unwrap());
+    let early_scene = Id::from_u128(1);
+    let late_scene = Id::from_u128(2);
+    for (scene, event, filename, text) in [
+        (
+            early_scene,
+            before,
+            "Aufbruch.md",
+            "Die Hüterin bricht auf.",
+        ),
+        (
+            late_scene,
+            when_known,
+            "Fund.md",
+            "Die Hüterin findet den Schlüssel.",
+        ),
+    ] {
+        write_document(
+            &path,
+            &format!("Manuskript/{filename}"),
+            scene,
+            "scene",
+            &format!("scene_event: {event}\ncharacters: [{character}]\n"),
+            text,
+        );
+    }
+
+    let reopened = Project::open(&path).unwrap();
+    let timeline = Timeline::from_project(&reopened);
+    let outline = Outline::from_project(&reopened);
+    let knowledge = Knowledge::from_project(&reopened);
     assert_eq!(
         knowledge
             .author_knowledge()
-            .map(|entry| entry.id)
+            .map(|entry| (entry.id, entry.body.trim()))
             .collect::<Vec<_>>(),
-        [author]
+        [(author, revelation)]
     );
-    assert_eq!(knowledge.known_by(character, before, &timeline).count(), 0);
+    let early = outline.scene(early_scene).unwrap();
+    let late = outline.scene(late_scene).unwrap();
+    let early_event = early.event.unwrap();
+    let late_event = late.event.unwrap();
+    assert_eq!(
+        timeline.compare(early_event, late_event),
+        TemporalOrder::Before
+    );
+    assert_eq!(
+        knowledge
+            .known_by(early.characters[0], early_event, &timeline)
+            .count(),
+        0
+    );
     assert_eq!(
         knowledge.known_by(character, elsewhere, &timeline).count(),
         0
     );
     assert_eq!(
         knowledge
-            .known_by(character, when_known, &timeline)
-            .map(|entry| entry.id)
+            .known_by(late.characters[0], late_event, &timeline)
+            .map(|entry| (entry.id, entry.body.trim()))
             .collect::<Vec<_>>(),
-        [figure]
-    );
-    assert_eq!(
-        knowledge.entry(figure).unwrap().claim.unwrap().state,
-        ClaimState::Believes
+        [(figure, revelation)]
     );
 }
 
