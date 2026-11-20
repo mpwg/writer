@@ -11,7 +11,7 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `8679b34` bestanden Formatprüfung, Clippy, alle 95 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `b7eb6c4` bestanden Formatprüfung, Clippy, alle 98 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -19,9 +19,10 @@ Bei einer externen Änderung an der geöffneten Szene zeigte die App die beiden 
 
 ## GPUI-Komponententests
 
-Die 38 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
+Die 41 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
 
 - Projektwahl, Neuanlage und erstes Tab-Ziel sowie Timeline-Netz, Ereignisliste, Verkettung, Zyklusdiagnose und Kapitelwechsel per Tastatur oder Ziehen. Ereignisentwürfe bleiben nach dem Wechsel zu Kapitel oder Szene erhalten.
+- Die Kürzel für „Buchprojekt öffnen“ und „Neues Buchprojekt“ starten Ordnerdialog und Anlageformular. Vor einem Buchwechsel wird der Text gesichert. Bei einem Konflikt bleiben beide Fassungen zur Auflösung offen. Ein Abbruch der Neuanlage kehrt mit dem bisherigen Fokus zur Szene zurück. Die native Auslösung der Befehle über das macOS-Menü „Ablage“ ist noch offen.
 - Beim Scrollen des Szenenbereichs behalten Projektleiste, Navigation und „Speichern“ ihre Position. Die Komponententests prüfen die Positionen bei 1080 × 520 und 680 × 520 px.
 - Ab 1120 px Fensterbreite erscheinen Markdown-Vorschau oder Szenendetails rechts neben dem Editor. Darunter wechseln sie die Ansicht. Der GPUI-Test bei 740 px prüft, dass beim Schließen der Vorschau Fokus und Auswahl im Editor erhalten bleiben.
 - Szeneneditor mit 900 Zeilen Umlauttext, Rückgängig-Kürzel und Autosave. Bei Git-Indexsperre bleibt der Text gesichert. Nach Freigabe erzeugt das Speicherkürzel genau einen Commit und lässt eine fremde Datei im Index. Ein frisch aufgebautes GPUI-Fenster öffnet die gewählte Konfliktfassung erneut. Der Konflikteditor lehnt leere Zusammenführungen ab. Die simulierte IME-Komposition prüft, dass erst der bestätigte Text gespeichert wird.
