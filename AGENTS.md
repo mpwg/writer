@@ -9,6 +9,7 @@
 - Lade für jede Rust-Aufgabe die einschlägigen Rust-Skills. Nutze beispielsweise `idiomatic-rust` für neue Rust-Implementierungen und `rust-testing` für Rust-Tests.
 - Nutze für die Desktop-Oberfläche die im Repository mitgelieferten Skills [gpui-kit](.agents/skills/gpui-kit/SKILL.md) und [gpui-kit-design-guides](.agents/skills/gpui-kit-design-guides/SKILL.md) samt den jeweils einschlägigen Referenzen.
 - Nutze [macos-app-design](.agents/skills/macos-app-design/SKILL.md) ergänzend für macOS-Konventionen bei Menüs, Tastenkürzeln, Fenstern und Werkzeugleisten. Setze diese Konventionen mit GPUI um.
+- Prüfe die Desktop-Oberfläche bei jedem UI-Review gegen alle drei Richtlinien. Nutze `gpui-kit` und `gpui-kit-design-guides` für Komponenten und deren Verhalten sowie `macos-app-design` für die Plattformkonventionen. Beziehe die einschlägigen Referenzen, die Design- und Barrierefreiheitschecklisten und vorhandene GPUI-Komponententests ein.
 - Nutze `delegate-work-efficiently` für Recherche, Analyse, Planung und Dokumentation sowie `delegate-coding-efficiently` für Implementierung, Fehlersuche, Refactoring und technische Prüfungen. Delegiere klar abgegrenzte, separat prüfbare Arbeitspakete, wenn der Nutzen den Koordinationsaufwand rechtfertigt. Der Hauptagent prüft die Ergebnisse und führt sie zusammen.
 
 ## Entwicklung und Versionen
