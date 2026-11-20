@@ -973,6 +973,44 @@ fn application_shutdown_flushes_pending_scene_text(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn close_window_shortcut_resolves_conflicts_before_closing(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let (workspace, path, external) = edit_scene_with_external_changes(cx);
+    cx.update(|cx| cx.set_quit_mode(gpui_kit::QuitMode::Explicit));
+    let shortcut = if cfg!(target_os = "macos") {
+        "cmd-w"
+    } else {
+        "ctrl-w"
+    };
+    cx.simulate_keystrokes(workspace.window, shortcut);
+    workspace.update(cx, |view, _, _| {
+        assert!(view.store.as_ref().unwrap().conflict().is_some());
+    });
+    assert_eq!(fs::read_to_string(&path).unwrap(), external);
+
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("keep-app", cx);
+        let editor = workspace.view.read(cx).editor.entity_id();
+        window.click(("input", editor), cx);
+        window.input("Vor dem Schließen ergänzt. ", cx);
+    })
+    .unwrap();
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("Vor dem Schließen ergänzt.")
+    );
+    cx.simulate_keystrokes(workspace.window, shortcut);
+    assert!(cx.windows().is_empty());
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("Vor dem Schließen ergänzt.")
+    );
+}
+
+#[gpui_kit::test]
 fn quit_shortcut_keeps_the_conflicting_scene_open(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 

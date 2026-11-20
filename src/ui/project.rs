@@ -27,6 +27,7 @@ actions!(
         SaveProject,
         UndoScene,
         QuitWriter,
+        CloseProjectWindow,
         ProjectSettings,
         ProjectExport
     ]
@@ -1444,6 +1445,11 @@ impl Render for ProjectView {
         div()
             .id("workspace")
             .track_focus(&self.keyboard_focus)
+            .on_action(cx.listener(|view, _: &CloseProjectWindow, window, cx| {
+                if view.flush(cx) {
+                    window.remove_window();
+                }
+            }))
             .when(!self.busy, |root| {
                 root.on_action(cx.listener(|view, _: &OpenProject, window, cx| {
                     view.choose_directory(false, window, cx)

@@ -2,8 +2,8 @@ mod ui;
 
 use gpui_kit::*;
 use ui::project::{
-    NewProject, OpenProject, ProjectExport, ProjectSettings, ProjectView, QuitWriter, SaveProject,
-    UndoScene,
+    CloseProjectWindow, NewProject, OpenProject, ProjectExport, ProjectSettings, ProjectView,
+    QuitWriter, SaveProject, UndoScene,
 };
 
 fn main() {
@@ -28,6 +28,8 @@ fn main() {
                 MenuItem::separator(),
                 MenuItem::action("Speichern", SaveProject),
                 MenuItem::action("Manuskript exportieren …", ProjectExport),
+                MenuItem::separator(),
+                MenuItem::action("Fenster schließen", CloseProjectWindow),
             ]),
         ]);
         open_workspace_window(cx);
@@ -93,7 +95,7 @@ fn editor_undo_shortcut() -> &'static str {
     }
 }
 
-fn writer_key_bindings() -> [KeyBinding; 6] {
+fn writer_key_bindings() -> [KeyBinding; 7] {
     [
         KeyBinding::new(
             if cfg!(target_os = "macos") {
@@ -135,6 +137,15 @@ fn writer_key_bindings() -> [KeyBinding; 6] {
             editor_undo_shortcut(),
             UndoScene,
             Some("WriterScene > Input"),
+        ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-w"
+            } else {
+                "ctrl-w"
+            },
+            CloseProjectWindow,
+            None,
         ),
         KeyBinding::new(
             if cfg!(target_os = "macos") {
