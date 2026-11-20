@@ -3,7 +3,7 @@ use gpui_kit::{App, ElementId, EntityId, TestAppContext, Window, test::TestWindo
 use writer::{
     Id, Project,
     outline::Outline,
-    timeline::{Relation, Timeline},
+    timeline::{Relation, TemporalOrder, Timeline},
 };
 
 const FIRST_EVENT: Id = Id::from_u128(0x00000000_0000_4000_8000_000000000001);
@@ -199,27 +199,87 @@ fn timeline_edits_and_removes_a_relation_from_the_network(cx: &mut TestAppContex
 #[gpui_kit::test]
 fn timeline_reports_cycle_without_changing_the_saved_relations(cx: &mut TestAppContext) {
     let workspace = open(cx);
-    let before = Timeline::from_project(&reopen(&workspace))
-        .relations()
-        .to_vec();
+    let deadline = Id::from_u128(0x00000000_0000_4000_8000_000000000003);
+    let (title, relation_time) = workspace.update(cx, |view, _, _| {
+        (view.event_title.entity_id(), view.relation_time.entity_id())
+    });
     interact(&workspace, cx, |window, cx| {
+        window.click(
+            format!("network-link-{FIRST_EVENT}-{SECOND_EVENT}-Before"),
+            cx,
+        );
+        window.click(format!("unlink-{FIRST_EVENT}-{SECOND_EVENT}-Before"), cx);
+        window.click("new-event", cx);
+        enter_text(window, title, "Funkstille", cx);
+        window.click("save-event", cx);
+
+        for (from, to) in [(FIRST_EVENT, deadline), (deadline, SECOND_EVENT)] {
+            window.click(format!("event-{from}"), cx);
+            window.click("event-link-picker", cx);
+            window.click(format!("target-{to}"), cx);
+            window.click("Liegt vor", cx);
+        }
+    });
+    let timeline = Timeline::from_project(&reopen(&workspace));
+    let isolated = timeline
+        .ordered_events()
+        .into_iter()
+        .find(|event| event.title == "Funkstille")
+        .unwrap()
+        .id;
+    assert_eq!(timeline.relations().len(), 2);
+    assert_eq!(
+        timeline.compare(FIRST_EVENT, SECOND_EVENT),
+        TemporalOrder::Before
+    );
+    for event in [FIRST_EVENT, deadline, SECOND_EVENT] {
+        assert_eq!(timeline.compare(event, isolated), TemporalOrder::Unknown);
+    }
+    interact(&workspace, cx, |window, cx| {
+        let isolated = format!("event-{isolated}");
+        assert!(
+            window
+                .find("timeline-unordered")
+                .bounds()
+                .contains(&window.find(isolated.clone()).bounds().origin)
+        );
+        window.click(format!("event-{SECOND_EVENT}"), cx);
+        window.click("Liste", cx);
+        assert_eq!(window.find(("input", title)).value(), Some("Aufbruch"));
+        window.click("close-event-inspector", cx);
+        for _ in 0..12 {
+            if window.find(isolated.clone()).focused() == Some(true) {
+                break;
+            }
+            window.press("tab", cx);
+        }
+        assert_eq!(window.find(isolated).focused(), Some(true));
+        window.press("enter", cx);
+        assert_eq!(window.find(("input", title)).value(), Some("Funkstille"));
+
         window.click(format!("event-{SECOND_EVENT}"), cx);
         window.click("event-link-picker", cx);
         window.click(format!("target-{FIRST_EVENT}"), cx);
-        window.click("Liegt vor", cx);
+        window.click(("input", relation_time), cx);
+        window.press("tab", cx);
+        assert_eq!(window.find("Liegt vor").focused(), Some(true));
+        window.press("enter", cx);
+        assert_eq!(
+            window.find("timeline-cycle-path").label(),
+            Some("Aufbruch → Erstkontakt → Fristablauf → Aufbruch")
+        );
+        window.press("escape", cx);
+        assert!(window.try_find("timeline-cycle-path").is_none());
     });
-
-    let error = workspace
-        .update(cx, |view, _, _| view.error.clone())
-        .unwrap();
-    assert!(error.starts_with("Zeitkreis"), "{error}");
-    assert!(
-        error.contains("Aufbruch") && error.contains("Erstkontakt"),
-        "{error}"
-    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    interact(&workspace, cx, |window, _| {
+        assert_eq!(window.find("Liegt vor").focused(), Some(true));
+    });
     assert_eq!(
         Timeline::from_project(&reopen(&workspace)).relations(),
-        before
+        timeline.relations()
     );
 }
 

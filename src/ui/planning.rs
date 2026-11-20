@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::*;
 use gpui_kit::base::{StyledExt as _, TestSupportExt as _};
 use gpui_kit::component::{
-    IconName, Selectable, Sizable,
+    IconName, Selectable, Sizable, WindowExt,
     button::ButtonGroup,
     input::{Input, Textarea},
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
@@ -384,7 +384,7 @@ impl ProjectView {
         }
     }
 
-    fn relate(&mut self, kind: Relation, cx: &mut Context<Self>) {
+    fn relate(&mut self, kind: Relation, window: &mut Window, cx: &mut Context<Self>) {
         let Some((from, to)) = self.event.zip(self.event_target) else {
             return;
         };
@@ -410,15 +410,40 @@ impl ProjectView {
                 }
             }
             Err(writer::timeline::TimelineError::Cycle { path }) => {
-                self.error = Some(format!(
-                    "Zeitkreis: {}",
+                let path = SharedString::from(
                     path.iter()
                         .filter_map(|id| timeline.event(*id))
                         .map(|event| event.title.as_str())
                         .collect::<Vec<_>>()
-                        .join(" → ")
-                ));
-                cx.notify();
+                        .join(" → "),
+                );
+                window.open_dialog(cx, move |dialog, _, _| {
+                    dialog
+                        .title("Zeitkreis")
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child("Wähle eine andere Richtung oder ein anderes Zielereignis.")
+                                .child(
+                                    div()
+                                        .id("timeline-cycle-path")
+                                        .test_support()
+                                        .aria_label(path.clone())
+                                        .child(path.clone()),
+                                )
+                                .max_h(rems(16.))
+                                .overflow_y_scrollbar(),
+                        )
+                        .footer(
+                            div().flex().justify_end().child(
+                                Button::new("close-timeline-cycle")
+                                    .label("Schließen")
+                                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                            ),
+                        )
+                });
             }
             Err(error) => {
                 self.error = Some(error.to_string());
@@ -988,9 +1013,9 @@ impl ProjectView {
                                 Button::new(relation_label(kind))
                                     .label(relation_label(kind))
                                     .small()
-                                    .on_click(
-                                        cx.listener(move |view, _, _, cx| view.relate(kind, cx)),
-                                    )
+                                    .on_click(cx.listener(move |view, _, window, cx| {
+                                        view.relate(kind, window, cx)
+                                    }))
                             })),
                     )
             })
