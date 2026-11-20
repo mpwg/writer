@@ -197,7 +197,7 @@ Die Plattform-Builds beginnen mit Paket 1. Paket 8 kann nach dem Projektformat u
 - [x] `cargo test --test detail_triggers` ausführen. Der Test muss die fehlende Funktion erkennen.
 - [x] Manuellen Button und Szenenwechsel an dieselbe opt-in-geschützte Anfrage anschließen. Automatische Anfragen je Inhaltsrevision bündeln, Ergebnisse ihrer Ursprungsszene zuordnen. Vorschlag zeigt Textstelle, Ziel und änderbaren Inhalt. Annahme aktualisiert Notiz, Verwerfen beendet Vorschlag. Nach Deaktivierung und während bloßer Schreibpause keine neue Anfrage. Stale Quellen bei Übernahme erneut prüfen.
 - [x] `cargo test --test detail_triggers` ausführen und die beschriebenen Anwendungsfälle prüfen. Erwartet werden erfolgreiche Assertions.
-- [ ] **Praktische Abnahme.** In Szene A tippen, pausieren und nach B wechseln. Erst der Wechsel löst eine automatische Suche aus. Die verspätete Antwort bleibt bei A abrufbar. Einen Vorschlag verwerfen, einen zweiten bearbeiten und übernehmen. Nur der bestätigte Text steht anschließend in der Zielnotiz.
+- [x] **Praktische Abnahme.** In Szene A tippen, pausieren und nach B wechseln. Erst der Wechsel löst eine automatische Suche aus. Die verspätete Antwort bleibt bei A abrufbar. Einen Vorschlag verwerfen, einen zweiten bearbeiten und übernehmen. Nur der bestätigte Text steht anschließend in der Zielnotiz. Der GPUI-Komponententest `detail_suggestions_trigger_on_leave_and_stay_with_the_edited_scene` steuert den Antwortzeitpunkt über die lokale Codex-Protokoll-Fixture.
 - [x] Geprüfte Änderungen als eigenständigen Git-Commit mit Co-Autoren-Trailer festhalten.
 
 ### 13. Beabsichtigte Widersprüche verwalten
