@@ -6,6 +6,8 @@ Entwurf vom 20. November 2026 zur inhaltlichen Freigabe.
 
 Die Autorin oder der Autor entwickelt eine Geschichte zunächst als Gefüge von Ereignissen. Erst daraus entstehen Szenen, Kapitel und schließlich Prosa. Die App begleitet diesen gesamten Weg auf macOS, Windows und Linux. Ein späterer mobiler Client bleibt eine Möglichkeit. Die Arbeitsdaten liegen als lesbare Text- und Markdown-Dateien vor. Git versioniert das Buchprojekt. Die KI hilft beim Nachdenken, Wiederfinden und Schreiben. Die Entscheidung über den Inhalt bleibt beim Menschen.
 
+Die KI-Unterstützung ist optional und standardmäßig ausgeschaltet. Planung, Schreiben, Git-Versionierung und Export funktionieren ohne KI. Erst wenn der Benutzer die KI für das Buchprojekt ausdrücklich aktiviert, darf die App den eingerichteten Dienst aufrufen. Die Aktivierung erlaubt auch automatische Aufrufe für die vorgesehenen Funktionen. Nach dem Ausschalten unterbleiben weitere KI-Aufrufe.
+
 ## Von Ereignissen zu Kapiteln
 
 Ein Ereignis kann zunächst aus einem einzigen Stichpunkt bestehen. Eine gerichtete Verbindung drückt entweder eine zeitliche Reihenfolge oder eine Ursache aus. Bei „B wird durch A ausgelöst“ gilt zugleich, dass A vor B liegt. Jede Verbindung kann eine kurze Erläuterung tragen. Weder ein Kalenderdatum noch eine vollständige Reihenfolge aller Ereignisse ist erforderlich. Im Beispiel des verlorenen Imperiums liegen hundert Jahre zwischen Erstkontakt und vereinbarter Rückkehr. Für den späteren Aufbruch kann zunächst „nach Ablauf der Frist“ genügen.
@@ -26,7 +28,7 @@ Der Entwurf lässt sich im Gespräch weiterentwickeln. Zur Übernahme wählt der
 
 ## Figurenwissen, Recherche und Konsistenz
 
-Das Projekt enthält Figuren, Konzepte, Ideen und weiteres Weltwissen. Beim Schreiben erkennt die App mögliche neue Details. Beim Verlassen der Szene oder über „Vorschläge anzeigen“ bietet sie die Übernahme an. Eine Schreibpause löst die Anzeige nicht aus. Ein Vorschlag zeigt die Quellstelle und den vorgesehenen Eintrag. Erst eine bestätigte Übernahme ändert die zugehörige Notiz.
+Das Projekt enthält Figuren, Konzepte, Ideen und weiteres Weltwissen. Bei aktivierter KI darf die App beim Verlassen der Szene automatisch Detailvorschläge anfordern. Über „Vorschläge anzeigen“ kann der Benutzer sie auch während des Schreibens selbst anfordern. Eine Schreibpause allein löst weder die Anfrage noch die Anzeige aus. Ein Vorschlag zeigt die Quellstelle und den vorgesehenen Eintrag. Erst eine bestätigte Übernahme ändert die zugehörige Notiz.
 
 Die KI kann das gesamte Manuskript durchsuchen, auch wenn eine Information nie in eine Kartei übernommen wurde. Antworten verweisen auf die konkrete Passage und erlauben den Sprung dorthin. Bei „Wann haben sich die beiden zuletzt gesehen und was haben sie gemacht?“ gilt standardmäßig der Zeitpunkt der aktuellen Szene in der Timeline. Auch eine Rückblende in einem späteren Kapitel kommt als Fundstelle infrage. Ist die jüngere Begegnung nur geplant und eine frühere bereits erzählt, zeigt die App beide mit ihrem jeweiligen Status. Eine ausgeschriebene Konzeptpassage bleibt als solche erkennbar. Bei zeitlich ungeordneten Treffern benennt die Antwort die Ungewissheit.
 
