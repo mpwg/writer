@@ -6,6 +6,15 @@ use ui::project::ProjectView;
 fn main() {
     application().with_assets(assets::Assets).run(|cx| {
         init(cx);
+        cx.bind_keys([KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-s"
+            } else {
+                "ctrl-s"
+            },
+            ui::project::SaveProject,
+            None,
+        )]);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Schreibwerkstatt".into()),
