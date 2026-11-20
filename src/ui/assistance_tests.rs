@@ -749,6 +749,217 @@ fn consistency_review_saves_the_reason_and_hides_the_dismissed_finding(cx: &mut 
 }
 
 #[gpui_kit::test]
+fn consistency_review_reports_a_changed_duration_after_a_confirmed_move(cx: &mut TestAppContext) {
+    consistency_review_after_scene_edits(cx, "Die Frist beträgt 50 Jahre.");
+}
+
+#[gpui_kit::test]
+fn consistency_review_reports_a_negated_statement_after_a_confirmed_move(cx: &mut TestAppContext) {
+    consistency_review_after_scene_edits(cx, "Die Frist beträgt nicht 100 Jahre.");
+}
+
+fn consistency_review_after_scene_edits(cx: &mut TestAppContext, changed_quote: &str) {
+    use serde_json::{Value, json};
+
+    let workspace = test_support::open(cx);
+    let home = tempfile::tempdir().unwrap();
+    let directory = home.path().join("codex");
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("empty-detail-replies"), "").unwrap();
+    let project = Project::open(&workspace.root).unwrap();
+    let scene = project
+        .scenes()
+        .find(|scene| scene.title() == "Das Signal")
+        .unwrap();
+    let scene_id = scene.id();
+    let mut timeline = Timeline::from_project(&project);
+    let edge = timeline.relations()[0].clone();
+    let original_quote = "Die Frist beträgt 100 Jahre.";
+    let other_paragraph = "Sie schaut zur Tür.";
+    let timeline_quote = "200 Jahre später";
+    let finding_title = "Dauer der Rückkehrfrist";
+    let reason = "Die Erzählerin irrt sich absichtlich.";
+    let mut store = Store::new(&workspace.root).unwrap();
+    store
+        .stage_body(
+            &store.relative_path(scene).unwrap(),
+            scene,
+            &format!("{original_quote}\n\n{other_paragraph}\n"),
+        )
+        .unwrap();
+    timeline
+        .relate_at(
+            edge.from,
+            edge.to,
+            edge.kind,
+            edge.note,
+            Some(timeline_quote.into()),
+        )
+        .unwrap();
+    timeline
+        .stage_event(edge.from, &project, &mut store)
+        .unwrap();
+    store.flush().unwrap();
+    workspace.update(cx, |view, _, _| view.refresh_project().unwrap());
+    enable_fixture(cx, &workspace, home.path());
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("close-settings", cx)
+    });
+
+    let mut turn = 0;
+    let mut check = |cx: &mut TestAppContext, quote: &str| {
+        codex_window(cx, &workspace, |window, cx| {
+            window.click(("page", 6_usize), cx)
+        });
+        wait_for(cx, |cx| {
+            workspace.update(cx, |view, _, _| view.ai.pending.is_none())
+        });
+        assert!(
+            !directory
+                .join(format!("consistency-{}-request", turn + 1))
+                .exists()
+        );
+        codex_window(cx, &workspace, |window, cx| {
+            window.click("check-consistency", cx);
+        });
+        let mut reported = false;
+        loop {
+            let kind = format!("consistency-{}", turn + 1);
+            let request = directory.join(format!("{kind}-request"));
+            wait_for(cx, |cx| {
+                request.exists() || workspace.update(cx, |view, _, _| view.ai.pending.is_none())
+            });
+            if !request.exists() {
+                break;
+            }
+            turn += 1;
+            let request: Value = serde_json::from_slice(&std::fs::read(request).unwrap()).unwrap();
+            let prompt = request["params"]["input"][0]["text"].as_str().unwrap();
+            let source_number = |source, expected_context| {
+                let (before_quote, _) = prompt.split_once(&format!("\n{source}\n"))?;
+                let header = before_quote.lines().last().unwrap();
+                let (number, context) = header.split_once(": ").unwrap();
+                assert_eq!(context, expected_context);
+                Some(number.parse::<usize>().unwrap())
+            };
+            let prose = source_number(quote, "Das Signal | Prosa |  | ");
+            let planning = source_number(timeline_quote, "Erstkontakt | Planung |  | ");
+            let response = match prose.zip(planning) {
+                Some((prose, planning)) => {
+                    reported = true;
+                    json!([{"title": finding_title, "sources": [prose, planning]}])
+                }
+                None => json!([]),
+            };
+            let response_path = directory.join(format!("{kind}-response"));
+            let temporary = response_path.with_extension("tmp");
+            std::fs::write(&temporary, serde_json::to_vec(&response).unwrap()).unwrap();
+            std::fs::rename(temporary, response_path).unwrap();
+        }
+        workspace.update(cx, |view, _, _| {
+            assert!(
+                reported,
+                "Die Anfrage muss beide aktuellen Aussagen vergleichen. Meldung: {:?}",
+                view.ai.messages.get(&super::Activity::Consistency)
+            );
+            assert_eq!(
+                view.ai
+                    .messages
+                    .get(&super::Activity::Consistency)
+                    .map(String::as_str),
+                Some("Konsistenzprüfung abgeschlossen.")
+            );
+            let [finding] = view.ai.findings.as_slice() else {
+                panic!("Genau ein belegter Widerspruch muss vorliegen.")
+            };
+            assert_eq!(
+                finding.sources,
+                [
+                    FindingSource {
+                        document: scene_id,
+                        quote: quote.into()
+                    },
+                    FindingSource {
+                        document: edge.from,
+                        quote: timeline_quote.into()
+                    },
+                ]
+            );
+        });
+    };
+    let edit = |cx: &mut TestAppContext, text: &str| {
+        codex_window(cx, &workspace, |window, cx| {
+            window.click(("page", 1_usize), cx);
+            window.click(format!("scene-{scene_id}"), cx);
+            window.click("outline-edit-scene", cx);
+            let editor = workspace.view.read(cx).editor.entity_id();
+            window.click(("input", editor), cx);
+            window.press("secondary-a", cx);
+            window.input(text, cx);
+        });
+    };
+
+    check(cx, original_quote);
+    codex_window(cx, &workspace, |window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("finding", 0_usize)).visible());
+        window.click("open-reason", cx);
+        window.input(reason, cx);
+        window.click(("dismiss-finding", 0_usize), cx);
+        assert!(window.try_find(("finding", 0_usize)).is_none());
+    });
+    let project = Project::open(&workspace.root).unwrap();
+    let review = Review::from_project(&project);
+    let [decision] = review.decisions() else {
+        panic!("Genau eine Entscheidung muss im Buch gespeichert sein.")
+    };
+    assert_eq!(decision.reason.as_deref(), Some(reason));
+
+    edit(cx, &format!("{other_paragraph}\n\n{original_quote}\n"));
+    check(cx, original_quote);
+    let project = Project::open(&workspace.root).unwrap();
+    let body = project.scene(scene_id).unwrap().body().trim();
+    assert_eq!(body, format!("{other_paragraph}\n\n{original_quote}"));
+    codex_window(cx, &workspace, |window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(("finding", 0_usize)).is_none());
+        window.click("marked-findings", cx);
+        let row = format!("decision-{}", decision.id);
+        assert!(window.find(row).visible());
+    });
+
+    edit(cx, &format!("{other_paragraph}\n\n{changed_quote}\n"));
+    check(cx, changed_quote);
+    codex_window(cx, &workspace, |window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(("finding", 0_usize)).visible());
+        assert_eq!(
+            window.find(("source", 10_000_usize)).label(),
+            Some("Das Signal")
+        );
+        assert_eq!(
+            window.find(("source", 10_001_usize)).label(),
+            Some("Erstkontakt → Aufbruch"),
+        );
+        window.click(("source", 10_000_usize), cx);
+    });
+    workspace.update(cx, |view, _, cx| {
+        assert_eq!(view.selected_scene, Some(scene_id));
+        assert_eq!(view.editor.read(cx).selected_text(), changed_quote);
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 6_usize), cx);
+        window.click(("source", 10_001_usize), cx);
+    });
+    workspace.update(cx, |view, _, cx| {
+        assert_eq!(view.page, Page::Timeline);
+        assert_eq!(view.event, Some(edge.from));
+        assert_eq!(view.event_target, Some(edge.to));
+        assert_eq!(view.relation_time.read(cx).value(), timeline_quote);
+    });
+}
+
+#[gpui_kit::test]
 fn consistency_source_opens_the_timeline_relationship(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     let project = Project::open(&workspace.root).unwrap();

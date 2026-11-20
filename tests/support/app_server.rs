@@ -47,6 +47,10 @@ fn response(id: &str, result: &str) {
     println!("{{\"id\":{id},\"result\":{result}}}");
 }
 
+fn complete_turn(turn: &str, reply: &str) {
+    event("turn/completed", &format!(r#"{{"threadId":"thread-valid","turn":{{"id":"{turn}","status":"completed","items":[{{"type":"agentMessage","id":"fixture-answer","text":{reply:?},"phase":"final_answer"}}],"error":null}}}}"#));
+}
+
 fn reply_from_file(codex_home: &std::path::Path, kind: &str, turn: &str, request: &str) {
     let path = codex_home.join(format!("{kind}-request"));
     let temporary = path.with_extension("tmp");
@@ -59,7 +63,7 @@ fn reply_from_file(codex_home: &std::path::Path, kind: &str, turn: &str, request
         thread::sleep(Duration::from_millis(5));
     }
     let reply = fs::read_to_string(answer).unwrap();
-    event("turn/completed", &format!(r#"{{"threadId":"thread-valid","turn":{{"id":"{turn}","status":"completed","items":[{{"type":"agentMessage","id":"fixture-answer","text":{reply:?},"phase":"final_answer"}}],"error":null}}}}"#));
+    complete_turn(turn, &reply);
 }
 
 fn main() {
@@ -70,6 +74,7 @@ fn main() {
     }
     let codex_home = PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
     let mut initialized = false;
+    let mut consistency_count = 0;
     let mut signed_in = false;
     let mut login_count = 0;
     let mut turn_count = 0;
@@ -135,8 +140,27 @@ fn main() {
                 assert!(line.contains("\"networkAccess\":false"));
                 assert!(line.contains("\"type\":\"readOnly\""));
                 if line.contains("Prozess beenden") { return; }
-                let turn_id = if turn_count == 1 { "turn-valid" } else { "turn-second" };
+                let consistency = line.contains("Prüfe die nummerierten Aussagen auf inhaltliche Widersprüche");
+                let empty_details = line.contains("Finde belegte Ergänzungen für bestehende Zielnotizen")
+                    && codex_home.join("empty-detail-replies").exists();
+                let numbered_turn = format!("turn-{turn_count}");
+                let turn_id = if consistency || empty_details {
+                    &numbered_turn
+                } else if turn_count == 1 {
+                    "turn-valid"
+                } else {
+                    "turn-second"
+                };
                 response(id, &format!(r#"{{"turn":{{"id":"{turn_id}","status":"inProgress","items":[],"error":null}}}}"#));
+                if consistency {
+                    consistency_count += 1;
+                    reply_from_file(&codex_home, &format!("consistency-{consistency_count}"), turn_id, &line);
+                    continue;
+                }
+                if empty_details {
+                    complete_turn(turn_id, "[]");
+                    continue;
+                }
                 if line.contains("Finde belegte Ergänzungen für bestehende Zielnotizen") {
                     assert_eq!(turn_count, 1, "repeated detail request for an unchanged scene");
                     reply_from_file(&codex_home, "detail", turn_id, &line);
