@@ -177,6 +177,45 @@ fn native_key_dispatch_undoes_a_long_scene_edit_and_persists_the_previous_text(
 }
 
 #[gpui_kit::test]
+fn scene_scroll_keeps_project_navigation_and_save_in_place(cx: &mut TestAppContext) {
+    assert_scene_scroll_keeps_project_controls(cx, px(1080.));
+}
+
+#[gpui_kit::test]
+fn scene_scroll_keeps_project_controls_in_place_in_a_narrow_window(cx: &mut TestAppContext) {
+    assert_scene_scroll_keeps_project_controls(cx, px(680.));
+}
+
+fn assert_scene_scroll_keeps_project_controls(cx: &mut TestAppContext, width: gpui_kit::Pixels) {
+    use gpui_kit::{ScrollDelta, test::TestWindowExt};
+
+    let workspace = open(cx);
+    cx.simulate_window_resize(workspace.window, size(width, px(520.)));
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("scene-details", cx);
+    })
+    .unwrap();
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.render_frame(cx);
+        let save = window.find("checkpoint").bounds();
+        let chapters = window.find(("page", 1_usize)).bounds();
+        let scene_details = window.find("scene-details").bounds();
+        window.scroll(
+            "scene-details",
+            ScrollDelta::Pixels(point(px(0.), px(-220.))),
+            cx,
+        );
+        assert!(window.find("scene-details").bounds().origin.y < scene_details.origin.y);
+        assert_eq!(window.find("checkpoint").bounds(), save);
+        assert_eq!(window.find(("page", 1_usize)).bounds(), chapters);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn scene_composition_saves_only_after_the_input_method_commits(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 

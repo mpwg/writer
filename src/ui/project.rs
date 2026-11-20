@@ -12,6 +12,7 @@ use gpui_kit::component::{
     ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    scroll::ScrollableElement,
 };
 use gpui_kit::{prelude::FluentBuilder, *};
 actions!(writer_actions, [SaveProject, UndoScene, QuitWriter]);
@@ -826,11 +827,12 @@ impl ProjectView {
         };
         let navigation = div()
             .flex()
+            .flex_shrink_0()
             .gap_2()
             .bg(rail)
             .p_3()
             .when(narrow, |rail| rail.flex_wrap())
-            .when(!narrow, |rail| rail.flex_col().w(px(184.)).flex_shrink_0())
+            .when(!narrow, |rail| rail.flex_col().w(px(184.)))
             .children(pages.into_iter().enumerate().map(|(index, (page, label))| {
                 Button::new(("page", index))
                     .label(label)
@@ -844,6 +846,7 @@ impl ProjectView {
             .flex_col()
             .flex_1()
             .min_w_0()
+            .min_h_0()
             .gap_4()
             .p_4()
             .when(!project.issues().is_empty(), |content| {
@@ -879,14 +882,19 @@ impl ProjectView {
                 Page::Manuscript => self.manuscript_view(cx),
                 Page::World => self.world_view(project, cx),
                 Page::Codex => self.assistance_view(project, cx),
-            });
+            })
+            .overflow_y_scrollbar()
+            .id(("workspace-page", self.page as usize));
         div()
             .flex()
             .flex_col()
+            .flex_1()
+            .min_h_0()
             .gap_3()
             .child(
                 div()
                     .flex()
+                    .flex_shrink_0()
                     .flex_wrap()
                     .items_center()
                     .gap_3()
@@ -923,6 +931,8 @@ impl ProjectView {
             .child(
                 div()
                     .flex()
+                    .flex_1()
+                    .min_h_0()
                     .gap_2()
                     .when(narrow, |layout| layout.flex_col())
                     .child(navigation)
@@ -939,20 +949,32 @@ impl Render for ProjectView {
             .id("workspace")
             .track_focus(&self.keyboard_focus)
             .on_action(cx.listener(|view, _: &SaveProject, window, cx| view.checkpoint(window, cx)))
+            .flex()
+            .flex_col()
             .size_full()
-            .overflow_y_scroll()
+            .overflow_hidden()
             .bg(if dark { rgb(0x252220) } else { rgb(0xfbf8f2) })
             .text_color(if dark { rgb(0xf0eae0) } else { rgb(0x27231e) })
             .p_5()
             .child(match &self.project {
-                Some(project) => self.workspace(project, window, cx),
-                None => self.welcome(cx),
+                Some(project) => self.workspace(project, window, cx).into_any_element(),
+                None => div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.welcome(cx))
+                    .overflow_y_scrollbar()
+                    .into_any_element(),
             })
             .when(self.busy, |content| {
-                content.child(div().mt_4().child("Projekt wird vorbereitet …"))
+                content.child(
+                    div()
+                        .flex_shrink_0()
+                        .mt_2()
+                        .child("Projekt wird vorbereitet …"),
+                )
             })
             .when_some(self.error.clone(), |content, error| {
-                content.child(div().mt_4().child(error))
+                content.child(div().flex_shrink_0().mt_2().child(error))
             })
     }
 }
