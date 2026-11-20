@@ -45,6 +45,7 @@ pub struct ProjectView {
     store: Option<Store>,
     editor: Entity<TextareaState>,
     merge: Entity<TextareaState>,
+    merge_path: Option<PathBuf>,
     autosave: Option<Task<()>>,
     last_version: Option<String>,
     last_export: Option<PathBuf>,
@@ -80,6 +81,8 @@ impl ProjectView {
             },
         )
         .detach();
+        let merge = cx.new(|cx| TextareaState::new(window, cx).rows(8));
+        cx.observe(&merge, |_, _, cx| cx.notify()).detach();
         let keyboard_focus = cx.focus_handle().tab_stop(false);
         window.focus(&keyboard_focus, cx);
         let view = cx.weak_entity();
@@ -90,7 +93,8 @@ impl ProjectView {
             keyboard_focus,
             store: None,
             editor,
-            merge: cx.new(|cx| TextareaState::new(window, cx).rows(8)),
+            merge,
+            merge_path: None,
             autosave: None,
             last_version: None,
             last_export: None,
@@ -471,8 +475,24 @@ impl ProjectView {
             {
                 self.select_scene(id, window, cx);
             }
-            self.merge
-                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.merge_path = None;
+        }
+    }
+
+    fn prepare_merge(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(conflict) = self.store.as_ref().and_then(Store::conflict) else {
+            self.merge_path = None;
+            return;
+        };
+        if self.merge_path.as_ref() != Some(&conflict.path) {
+            self.merge_path = Some(conflict.path.clone());
+            self.merge.update(cx, |input, cx| {
+                input.set_value(
+                    String::from_utf8_lossy(&conflict.in_app).into_owned(),
+                    window,
+                    cx,
+                );
+            });
         }
     }
 
@@ -507,6 +527,8 @@ impl ProjectView {
                     }),
             )
             .when_some(conflict, |pane, conflict| {
+                let merge = self.merge.read(cx).value();
+                let validation = conflict.validate_merge(merge.as_bytes());
                 pane.child(format!("Dateikonflikt · {}", conflict.path.display()))
                     .child("In der App")
                     .child(String::from_utf8_lossy(&conflict.in_app).into_owned())
@@ -516,7 +538,10 @@ impl ProjectView {
                         |bytes| String::from_utf8_lossy(bytes).into_owned(),
                     ))
                     .child("Zusammengeführte Datei")
-                    .child(Textarea::new(&self.merge))
+                    .child(Textarea::new(&self.merge).aria_label("Zusammengeführte Datei"))
+                    .when_some(validation.as_ref().err(), |pane, error| {
+                        pane.child(error.to_string())
+                    })
                     .child(
                         div()
                             .flex()
@@ -859,6 +884,7 @@ impl ProjectView {
 
 impl Render for ProjectView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.prepare_merge(window, cx);
         let dark = cx.theme().is_dark();
         div()
             .id("workspace")

@@ -215,6 +215,68 @@ fn scene_composition_saves_only_after_the_input_method_commits(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn empty_merge_keeps_both_conflict_versions(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let path = workspace.root.join("Manuskript/Signal.md");
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    let external = format!("{}\nExterne Fassung.", fs::read_to_string(&path).unwrap());
+    fs::write(&path, &external).unwrap();
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input("Interne Fassung.", cx);
+    })
+    .unwrap();
+    workspace.update(cx, |view, _, cx| assert!(!view.flush(cx)));
+
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.render_frame(cx);
+        let field = ("input", workspace.view.read(cx).merge.entity_id());
+        assert!(
+            window
+                .find(field)
+                .value()
+                .unwrap()
+                .contains("Interne Fassung.")
+        );
+    })
+    .unwrap();
+    workspace.update(cx, |view, window, cx| {
+        view.merge
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    });
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("merge-apply", cx)
+    })
+    .unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), external);
+    workspace.update(cx, |view, _, _| {
+        let conflict = view.store.as_ref().unwrap().conflict().unwrap();
+        assert!(String::from_utf8_lossy(&conflict.in_app).contains("Interne Fassung."));
+    });
+
+    workspace.update(cx, |view, window, cx| {
+        let merged = format!("{external}\nZusammengeführte Fassung.");
+        view.merge
+            .update(cx, |input, cx| input.set_value(merged, window, cx));
+    });
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("merge-apply", cx)
+    })
+    .unwrap();
+    let reopened = Project::open(&workspace.root).unwrap();
+    assert!(
+        reopened
+            .scene(id)
+            .unwrap()
+            .body()
+            .contains("Zusammengeführte Fassung.")
+    );
+}
+
+#[gpui_kit::test]
 fn conflict_resolution_survives_reopening_the_book_in_a_new_view(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
@@ -306,25 +368,11 @@ fn project_picker_tab_reaches_the_first_action_on_start(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-fn save_shortcut_flushes_the_editor_and_creates_one_local_version(cx: &mut TestAppContext) {
+fn save_shortcut_creates_one_local_version_after_retrying_a_locked_index(cx: &mut TestAppContext) {
     use gpui_kit::test::TestWindowExt;
 
     let workspace = open(cx);
     let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
-    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
-    cx.update_window(workspace.window, |_, window, cx| {
-        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
-        window.input("Version über Tastatur. ", cx);
-    })
-    .unwrap();
-    let shortcut = if cfg!(target_os = "macos") {
-        "cmd-s"
-    } else {
-        "ctrl-s"
-    };
-    cx.simulate_keystrokes(workspace.window, shortcut);
-    cx.run_until_parked();
-
     let git = |args: &[&str]| {
         let output = Command::new("git")
             .arg("-C")
@@ -339,14 +387,50 @@ fn save_shortcut_flushes_the_editor_and_creates_one_local_version(cx: &mut TestA
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    assert_eq!(git(&["rev-list", "--count", "HEAD"]).trim(), "1");
-    let saved = git(&["show", "HEAD:Manuskript/Signal.md"]);
-    assert!(saved.contains("Version über Tastatur."));
-    assert_eq!(
-        saved,
-        fs::read_to_string(workspace.root.join("Manuskript/Signal.md")).unwrap()
-    );
+    let initial = Store::new(&workspace.root)
+        .unwrap()
+        .checkpoint("Ausgangsfassung")
+        .unwrap();
+    fs::write(workspace.root.join("fremd.txt"), "Fremd").unwrap();
+    git(&["add", "fremd.txt"]);
+    let index_lock = workspace.root.join(".git/index.lock");
+    fs::write(&index_lock, []).unwrap();
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input("Version über Tastatur. ", cx);
+    })
+    .unwrap();
+    let shortcut = if cfg!(target_os = "macos") {
+        "cmd-s"
+    } else {
+        "ctrl-s"
+    };
     cx.simulate_keystrokes(workspace.window, shortcut);
     cx.run_until_parked();
-    assert_eq!(git(&["rev-list", "--count", "HEAD"]).trim(), "1");
+    workspace.update(cx, |view, _, _| {
+        assert!(
+            view.error
+                .as_deref()
+                .is_some_and(|error| error.contains("Lokale Version"))
+        );
+    });
+    let scene_path = "Manuskript/Signal.md";
+    let disk_text = fs::read_to_string(workspace.root.join(scene_path)).unwrap();
+    assert!(disk_text.contains("Version über Tastatur."));
+    assert_eq!(git(&["rev-parse", "HEAD"]).trim(), initial.id);
+    assert!(!git(&["show", "HEAD:Manuskript/Signal.md"]).contains("Version über Tastatur."));
+
+    fs::remove_file(index_lock).unwrap();
+    cx.simulate_keystrokes(workspace.window, shortcut);
+    cx.run_until_parked();
+    assert_eq!(git(&["show", "HEAD:Manuskript/Signal.md"]), disk_text);
+    cx.simulate_keystrokes(workspace.window, shortcut);
+    cx.run_until_parked();
+    assert_eq!(git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+    assert_eq!(
+        git(&["diff", "--cached", "--name-only"]).trim(),
+        "fremd.txt"
+    );
+    assert!(!git(&["ls-tree", "--name-only", "HEAD"]).contains("fremd.txt"));
 }
