@@ -8,6 +8,7 @@ mod planning;
 mod world;
 use std::{path::PathBuf, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
     ActiveTheme, Disableable,
     button::{Button, ButtonVariants},
@@ -32,6 +33,14 @@ enum Page {
     Codex,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SceneInspector {
+    Preview,
+    Details,
+}
+
+const SCENE_INSPECTOR_MIN_WIDTH: Pixels = px(1120.);
+
 pub struct ProjectView {
     keyboard_focus: FocusHandle,
     _quit_subscription: Subscription,
@@ -51,8 +60,7 @@ pub struct ProjectView {
     autosave: Option<Task<()>>,
     last_version: Option<String>,
     last_export: Option<PathBuf>,
-    preview: bool,
-    show_scene_details: bool,
+    scene_inspector: Option<SceneInspector>,
     scene_text: Option<writer::passage::SceneText>,
     scene_baseline: Option<writer::Document>,
     page: Page,
@@ -140,8 +148,7 @@ impl ProjectView {
             autosave: None,
             last_version: None,
             last_export: None,
-            preview: false,
-            show_scene_details: false,
+            scene_inspector: None,
             scene_text: None,
             scene_baseline: None,
             page: Page::Timeline,
@@ -459,7 +466,7 @@ impl ProjectView {
             editor.set_value(text.text().to_owned(), window, cx)
         });
         self.scene_text = Some(text);
-        self.show_scene_details = false;
+        self.scene_inspector = None;
         self.scene_baseline = Some(scene.clone());
         self.page = Page::Scene;
         self.selected_scene = Some(id);
@@ -636,6 +643,7 @@ impl ProjectView {
         self.last_export = None;
         self.scene_text = None;
         self.scene_baseline = None;
+        self.scene_inspector = None;
         self.event_title
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.form_body
@@ -703,11 +711,26 @@ impl ProjectView {
         }
     }
 
-    fn scene_view(&self, project: &Project, cx: &mut Context<Self>) -> Div {
+    fn toggle_scene_inspector(
+        &mut self,
+        inspector: SceneInspector,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.scene_inspector == Some(inspector) {
+            self.scene_inspector = None;
+            if window.viewport_size().width < SCENE_INSPECTOR_MIN_WIDTH {
+                self.editor
+                    .update(cx, |editor, cx| editor.focus(window, cx));
+            }
+        } else {
+            self.scene_inspector = Some(inspector);
+        }
+        cx.notify();
+    }
+
+    fn scene_editor(&self, scene: Id, cx: &mut Context<Self>) -> Div {
         use writer::passage::TextFormat;
-        let Some(scene) = self.selected_scene.and_then(|id| project.scene(id)) else {
-            return div().child("Wähle eine Szene in der Kapitelansicht.");
-        };
         let actions = [
             ("fett", "Fett", Some(TextFormat::Bold), None),
             ("kursiv", "Kursiv", Some(TextFormat::Italic), None),
@@ -725,25 +748,9 @@ impl ProjectView {
         let layout = div()
             .flex()
             .flex_col()
+            .flex_1()
+            .min_w_0()
             .gap_2()
-            .child(div().text_lg().child(scene.title().to_owned()))
-            .child(
-                div().flex().items_center().gap_2().child(
-                    Button::new("scene-details")
-                        .label(if self.show_scene_details {
-                            "Szenendetails schließen"
-                        } else {
-                            "Szenendetails"
-                        })
-                        .on_click(cx.listener(|view, _, _, cx| {
-                            view.show_scene_details = !view.show_scene_details;
-                            cx.notify();
-                        })),
-                ),
-            )
-            .when(self.show_scene_details, |layout| {
-                layout.child(self.scene_timing(project, scene.id(), cx))
-            })
             .child(
                 div()
                     .flex()
@@ -758,18 +765,6 @@ impl ProjectView {
                     })),
             )
             .child(
-                Button::new("preview")
-                    .label(if self.preview {
-                        "Vorschau schließen"
-                    } else {
-                        "Markdown-Vorschau"
-                    })
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.preview = !view.preview;
-                        cx.notify();
-                    })),
-            )
-            .child(
                 div()
                     .key_context("WriterScene")
                     .on_action(cx.listener(|view, _: &UndoScene, window, cx| {
@@ -777,32 +772,108 @@ impl ProjectView {
                     }))
                     .child(Textarea::new(&self.editor).aria_label("Szenentext")),
             )
-            .child(self.scene_assistance(scene.id(), cx));
+            .child(self.scene_assistance(scene, cx));
         let Some(text) = &self.scene_text else {
             return layout;
         };
-        layout
-            .when(!text.concepts().is_empty(), |layout| {
-                layout.child(
+        layout.when(!text.concepts().is_empty(), |layout| {
+            layout.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(text.concepts().iter().map(|concept| {
+                        div()
+                            .border_l_2()
+                            .border_color(rgb(0xb98a37))
+                            .pl_2()
+                            .child(format!("Konzept · {}", &text.text()[concept.range.clone()]))
+                    })),
+            )
+        })
+    }
+
+    fn scene_view(&self, project: &Project, window: &Window, cx: &mut Context<Self>) -> Div {
+        use SceneInspector::{Details, Preview};
+        let Some(scene) = self.selected_scene.and_then(|id| project.scene(id)) else {
+            return div().child("Wähle eine Szene in der Kapitelansicht.");
+        };
+        let split = window.viewport_size().width >= SCENE_INSPECTOR_MIN_WIDTH;
+        let current = self.scene_inspector;
+        let inspector_actions = [
+            (
+                "preview",
+                "Markdown-Vorschau",
+                "Vorschau schließen",
+                Preview,
+            ),
+            (
+                "scene-details",
+                "Szenendetails",
+                "Szenendetails schließen",
+                Details,
+            ),
+        ];
+        let toolbar = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().text_lg().child(scene.title().to_owned()))
+            .children(
+                inspector_actions
+                    .into_iter()
+                    .map(|(id, open, close, inspector)| {
+                        Button::new(id)
+                            .label(if current == Some(inspector) {
+                                close
+                            } else {
+                                open
+                            })
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.toggle_scene_inspector(inspector, window, cx);
+                            }))
+                    }),
+            );
+        let panes = div()
+            .flex()
+            .gap_4()
+            .items_start()
+            .when(split || current.is_none(), |panes| {
+                panes.child(self.scene_editor(scene.id(), cx))
+            })
+            .when_some(current, |panes, inspector| {
+                let content = match inspector {
+                    Details => self
+                        .scene_timing(project, scene.id(), cx)
+                        .into_any_element(),
+                    Preview => div()
+                        .id("scene-preview")
+                        .children(self.scene_text.as_ref().map(|text| {
+                            gpui_kit::component::text::TextView::markdown(
+                                "markdown-preview",
+                                writer::export::preview_markdown(text),
+                            )
+                        }))
+                        .test_support()
+                        .into_any_element(),
+                };
+                panes.child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .children(text.concepts().iter().map(|concept| {
-                            div()
-                                .border_l_2()
-                                .border_color(rgb(0xb98a37))
-                                .pl_2()
-                                .child(format!("Konzept · {}", &text.text()[concept.range.clone()]))
-                        })),
+                        .min_w_0()
+                        .flex_shrink_0()
+                        .when(split, |panel| {
+                            panel
+                                .w(px(340.))
+                                .border_l_1()
+                                .border_color(cx.theme().border)
+                                .pl_4()
+                        })
+                        .when(!split, |panel| panel.w_full())
+                        .child(content),
                 )
-            })
-            .when(self.preview, |layout| {
-                layout.child(gpui_kit::component::text::TextView::markdown(
-                    "markdown-preview",
-                    writer::export::preview_markdown(text),
-                ))
-            })
+            });
+        div().flex().flex_col().gap_3().child(toolbar).child(panes)
     }
 
     fn workspace(&self, project: &Project, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -878,7 +949,7 @@ impl ProjectView {
             .child(match self.page {
                 Page::Timeline => self.timeline_view(project, cx),
                 Page::Outline => self.outline_view(project, cx),
-                Page::Scene => self.scene_view(project, cx),
+                Page::Scene => self.scene_view(project, window, cx),
                 Page::Manuscript => self.manuscript_view(cx),
                 Page::World => self.world_view(project, cx),
                 Page::Codex => self.assistance_view(project, cx),

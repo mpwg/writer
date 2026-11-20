@@ -177,6 +177,57 @@ fn native_key_dispatch_undoes_a_long_scene_edit_and_persists_the_previous_text(
 }
 
 #[gpui_kit::test]
+fn wide_scene_places_the_preview_next_to_the_editor(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("preview", cx);
+        let field = ("input", workspace.view.read(cx).editor.entity_id());
+        let editor = window.find(field).bounds();
+        let preview = window.find("scene-preview").bounds();
+        assert!(editor.right() <= preview.left());
+        assert!(preview.top() < editor.bottom());
+
+        window.click("scene-details", cx);
+        assert!(window.try_find("scene-preview").is_none());
+        assert!(window.find("set-scene-time").visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn narrow_scene_preview_returns_to_the_same_editor_selection(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    cx.simulate_window_resize(workspace.window, size(px(740.), px(720.)));
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let field = workspace.update(cx, |view, window, cx| {
+        view.select_scene(id, window, cx);
+        view.editor.update(cx, |editor, cx| {
+            editor.set_selected_range(0..4, cx);
+            editor.focus(window, cx);
+        });
+        ("input", view.editor.entity_id())
+    });
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click("preview", cx);
+        assert!(window.try_find(field).is_none());
+        assert!(window.find("scene-preview").visible());
+
+        window.click("preview", cx);
+        assert_eq!(window.find(field).focused(), Some(true));
+    })
+    .unwrap();
+    workspace.update(cx, |view, _, cx| {
+        assert_eq!(view.editor.read(cx).selected_range(), 0..4)
+    });
+}
+
+#[gpui_kit::test]
 fn scene_scroll_keeps_project_navigation_and_save_in_place(cx: &mut TestAppContext) {
     assert_scene_scroll_keeps_project_controls(cx, px(1080.));
 }
