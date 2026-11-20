@@ -11,7 +11,7 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `480c715` bestanden Formatprüfung, Clippy, alle 118 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `22c27be` bestanden Formatprüfung, Clippy, alle 119 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -19,7 +19,7 @@ Bei einer externen Änderung an der geöffneten Szene zeigte die App die beiden 
 
 ## GPUI-Komponententests
 
-Die 60 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Ein zusätzlicher GPUI-Test prüft die helle und dunkle Anwendungspalette. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
+Die 61 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Ein zusätzlicher GPUI-Test prüft die helle und dunkle Anwendungspalette. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
 
 - Projektwahl, Neuanlage und erstes Tab-Ziel sowie Timeline-Netz, Ereignisliste, Verkettung, Zyklusdiagnose und Kapitelwechsel per Tastatur oder Ziehen. Ereignisentwürfe bleiben nach dem Wechsel zu Kapitel oder Szene erhalten.
 - Die Kürzel für „Buchprojekt öffnen“ und „Neues Buchprojekt“ starten Ordnerdialog und Anlageformular. Vor einem Buchwechsel wird der Text gesichert. Bei einem Konflikt bleiben beide Fassungen zur Auflösung offen. Ein Abbruch der Neuanlage kehrt mit dem bisherigen Fokus zur Szene zurück. Die native Auslösung der Befehle über das macOS-Menü „Ablage“ ist noch offen.
@@ -51,6 +51,7 @@ Die Sichtprüfung zeigte noch die neutrale Standardpalette. Die danach eingebund
 
 - Die Protokoll-Fixture prüft lokalen Opt-in, Anmeldung, fragmentierte Antworten, Abbruch, Prozessende und ausbleibende Übernahmen bei verspäteten Ergebnissen.
 - Der GPUI-Test für Detailvorschläge prüft, dass die Schreibpause ohne Anfrage bleibt und erst beim Szenenwechsel der bearbeitete Text an den lokalen Testserver geht. Die Antwort trifft in der zweiten Szene ein und wird der Ursprungsszene zugeordnet. Verwerfen und Übernehmen ändern die Weltkartei erst bei Bestätigung. Die gespeicherte Zielnotiz enthält ausschließlich die bestätigte, bearbeitete Ergänzung.
+- Die GPUI-Tests für Szenenentwürfe prüfen die Teilübernahme aus einem Entwurf für zwei Konzeptstichpunkte. Benachbarte Prosa und der Konzeptstatus bleiben erhalten. Ohne Bestätigung wird keine Weltkarte angelegt. Bei einer verspäteten Antwort auf eine inzwischen doppelte Zielpassage übernimmt die App den Ausschnitt erst nach einer neuen Textauswahl.
 - Ein durchgehender GPUI-Test verbindet die Codex-Ansicht mit derselben lokalen Protokoll-Fixture. Er durchläuft Opt-in, simulierte Anmeldung und eine Frage zum Ereignispaar. Danach markiert er einen Teil der Antwort als Idee, schaltet Codex aus und öffnet das Buch mit umgekehrter Ereignisauswahl. Gespräch und Markierung bleiben erhalten. Der Abbruch lässt Ereignisse und Beziehungen unverändert. Nach zweimaliger Bestätigung liegen genau ein neues Ereignis und die gewählte Beziehung vor.
 - Die installierte Codex-CLI erreichte mit synthetischem Buch im nativen Fenster den Browser-Anmeldeschritt. Anmeldung abgebrochen, KI ausgeschaltet und den Aus-Zustand geprüft.
 - Die persönliche ChatGPT-Anmeldung, echte Modellantworten und der anschließende vollständige Codex-Durchlauf stehen aus. Die Übernahme von Ideen, Entwürfen, Detailvorschlägen und Entscheidungen hat lokale Fachtests.
