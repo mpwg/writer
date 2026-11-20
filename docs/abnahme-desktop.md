@@ -12,7 +12,7 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. In einer separaten Kopie des Repositorys kehrte ein absichtlich geänderter Markdown-Export die Kapitelreihenfolge um. Der Test scheiterte am Vergleich der beiden Szenenpositionen und bestand anschließend im unveränderten Repository. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `ad8013d` bestanden Formatprüfung, Clippy, alle 123 lokalen Tests und der native macOS-Release-Build. Cargo lief mit `--offline --locked`. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `981364c` bestanden Formatprüfung, Clippy, alle 123 lokalen Tests und der native macOS-Release-Build. Cargo lief mit `--offline --locked`. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -57,6 +57,7 @@ Im nativen macOS-Release-Build von `ad8013d` wurde das Testbuch in einem eigenen
 ## Codex
 
 - Die Protokoll-Fixture prüft lokalen Opt-in, Anmeldung, fragmentierte Antworten, Abbruch, Prozessende und ausbleibende Übernahmen bei verspäteten Ergebnissen.
+- Ein GPUI-Durchlauf aktiviert KI für das Testbuch mit einem bewusst fehlenden Pfad zur Codex-Binärdatei. Bei aktiver Freigabe meldet die App die fehlende CLI und sperrt Modellanfragen. Der Editor speichert die Änderung, und beide Exporte enthalten den geänderten Umlauttext und die Konzeptbeschriftung. Anschließend lässt sich die Freigabe widerrufen.
 - Ein GPUI-Test stellt die Recherchefrage aus dem Szeneneditor. Der an die lokale Protokoll-Fixture übergebene Kontext unterscheidet Prosa und Planung, enthält die zeitliche Beziehung der Rückblende zur geplanten Begegnung und lässt die Reihenfolge zweier Treffen offen. Jeder der vier Belege aus der simulierten Antwort öffnet die richtige Szene und markiert die zitierte Passage.
 - Zwei GPUI-Tests führen die Konsistenzprüfung mit der lokalen Protokoll-Fixture durch. Eine begründete Entscheidung gilt nach Verschieben des Absatzes und erneuter Prüfung weiter. Eine veränderte Jahreszahl und eine Negation erscheinen jeweils wieder als offener Befund. Beide Quellensprünge führen zur aktuellen Szene beziehungsweise zur Dauerangabe der ursprünglichen Timeline-Kante.
 - Der GPUI-Test für Detailvorschläge prüft, dass die Schreibpause ohne Anfrage bleibt und erst beim Szenenwechsel der bearbeitete Text an den lokalen Testserver geht. Die Antwort trifft in der zweiten Szene ein und wird der Ursprungsszene zugeordnet. Verwerfen und Übernehmen ändern die Weltkartei erst bei Bestätigung. Die gespeicherte Zielnotiz enthält ausschließlich die bestätigte, bearbeitete Ergänzung.
