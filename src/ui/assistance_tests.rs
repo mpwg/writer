@@ -355,6 +355,185 @@ fn research_only_shows_verified_citations_and_opens_the_chosen_passage(cx: &mut 
 }
 
 #[gpui_kit::test]
+fn research_from_the_scene_preserves_chronology_and_links_each_passage(cx: &mut TestAppContext) {
+    use serde_json::{Value, json};
+    use writer::{Id, timeline::TemporalOrder};
+
+    let workspace = test_support::open(cx);
+    let home = tempfile::tempdir().unwrap();
+    let project = Project::open(&workspace.root).unwrap();
+    let mut timeline = Timeline::from_project(&project);
+    let mut store = Store::new(&workspace.root).unwrap();
+    let scene_id = |title| {
+        project
+            .scenes()
+            .find(|scene| scene.title() == title)
+            .unwrap()
+            .id()
+    };
+    let start = scene_id("Der Start");
+    let flashback = scene_id("Das Signal");
+    let reference = timeline
+        .ordered_events()
+        .into_iter()
+        .find(|event| event.title == "Aufbruch")
+        .unwrap()
+        .id;
+    let sources = [
+        (
+            flashback,
+            "Das Signal",
+            "Prosa",
+            "bis zum Bezugspunkt",
+            "Ada traf Ben an der Antenne.",
+        ),
+        (
+            start,
+            "Der Start",
+            "Planung",
+            "bis zum Bezugspunkt",
+            "- Ada soll Ben an der Rampe treffen.",
+        ),
+        (
+            Id::new_v4(),
+            "An der Schleuse",
+            "Prosa",
+            "zeitlich offen",
+            "Ada traf Ben an der Schleuse.",
+        ),
+        (
+            Id::new_v4(),
+            "Im Funkraum",
+            "Prosa",
+            "zeitlich offen",
+            "Ada traf Ben im Funkraum.",
+        ),
+    ];
+    let mut open_events = Vec::new();
+    for (id, title, _, _, quote) in sources {
+        if let Some(scene) = project.scene(id) {
+            store
+                .stage_body(&store.relative_path(scene).unwrap(), scene, quote)
+                .unwrap();
+        } else {
+            let event = timeline.create_event(title, "", None);
+            timeline.stage_event(event, &project, &mut store).unwrap();
+            open_events.push(event);
+            std::fs::write(
+                workspace.root.join("Manuskript").join(format!("{id}.md")),
+                format!("---\nid: {id}\nkind: scene\ntitle: {title}\nscene_event: {event}\n---\n{quote}\n"),
+            )
+            .unwrap();
+        }
+    }
+    store.flush().unwrap();
+    assert_eq!(
+        timeline.compare(open_events[0], open_events[1]),
+        TemporalOrder::Unknown
+    );
+    workspace.update(cx, |view, _, _| view.refresh_project().unwrap());
+    enable_fixture(cx, &workspace, home.path());
+    let question = "Wann haben sich Ada und Ben zuletzt getroffen?";
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("close-settings", cx);
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{start}"), cx);
+        window.click("outline-edit-scene", cx);
+        window.click("ask-from-scene", cx);
+        let input = workspace.view.read(cx).ai.research_input.entity_id();
+        window.click(("input", input), cx);
+        window.input(question, cx);
+        window.click("ask", cx);
+    });
+
+    let reply = |cx: &mut TestAppContext, kind: &str, statements: &[(&str, &[usize])]| {
+        let directory = home.path().join("codex");
+        let request_path = directory.join(format!("{kind}-request"));
+        wait_for(cx, |_| request_path.exists());
+        let request: Value = serde_json::from_slice(&std::fs::read(request_path).unwrap()).unwrap();
+        let prompt = request["params"]["input"][0]["text"].as_str().unwrap();
+        assert!(prompt.contains(question));
+        let numbers: Vec<_> = sources
+            .iter()
+            .map(|(_, title, scenario, scope, quote)| {
+                let (before_quote, _) = prompt.split_once(&format!("\n{quote}\n")).unwrap();
+                let header = before_quote.lines().last().unwrap();
+                let (number, context) = header.split_once(": ").unwrap();
+                assert_eq!(context, format!("{title} | {scenario} | {scope} | "));
+                number.parse::<usize>().unwrap()
+            })
+            .collect();
+        let precedes = |earlier: usize, later: usize| {
+            let edge = format!("{} liegt vor {}", numbers[earlier], numbers[later]);
+            prompt.lines().any(|line| line == edge)
+        };
+        assert!(precedes(0, 1));
+        assert!(!precedes(2, 3) && !precedes(3, 2));
+        let result: Vec<_> = statements
+            .iter()
+            .map(|(statement, indices)| {
+                json!({
+                    "statement": statement,
+                    "sources": indices.iter().map(|&index| numbers[index]).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let response = directory.join(format!("{kind}-response"));
+        let temporary = response.with_extension("tmp");
+        std::fs::write(&temporary, serde_json::to_vec(&result).unwrap()).unwrap();
+        std::fs::rename(temporary, response).unwrap();
+    };
+    reply(
+        cx,
+        "research",
+        &[
+            ("In der Rückblende treffen sie sich an der Antenne.", &[0]),
+            ("Das Treffen an der Rampe ist geplant.", &[1]),
+            (
+                "Für Schleuse und Funkraum bleibt die Reihenfolge offen.",
+                &[2, 3],
+            ),
+        ],
+    );
+    let summary = "Die Rückblende schildert das Treffen an der Antenne. Die Rampe ist Planung. Die Reihenfolge der Treffen an der Schleuse und im Funkraum ist offen.";
+    reply(cx, "research-summary", &[(summary, &[0, 1, 2, 3])]);
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai.pending.is_none()
+                && view
+                    .ai
+                    .answers
+                    .iter()
+                    .any(|answer| answer.statement == summary)
+        })
+    });
+
+    for (index, (id, title, scenario, scope, quote)) in sources.into_iter().enumerate() {
+        codex_window(cx, &workspace, |window, cx| {
+            let source = ("source", index);
+            assert_eq!(
+                window.find(source).label(),
+                Some(format!("{title} · {scenario} · {scope} · {quote}").as_str())
+            );
+            window.click(source, cx);
+        });
+        workspace.update(cx, |view, _, cx| {
+            assert!(matches!(view.page, Page::Scene));
+            assert_eq!(view.selected_scene, Some(id));
+            assert_eq!(view.editor.read(cx).selected_text(), quote);
+        });
+        if index + 1 < sources.len() {
+            codex_window(cx, &workspace, |window, cx| {
+                window.click("ask-from-scene", cx);
+                if id != start {
+                    window.click(format!("research-at-{reference}"), cx);
+                }
+            });
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     let settings_dir = tempfile::tempdir().unwrap();

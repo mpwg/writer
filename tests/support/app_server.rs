@@ -48,7 +48,10 @@ fn response(id: &str, result: &str) {
 }
 
 fn reply_from_file(codex_home: &std::path::Path, kind: &str, turn: &str, request: &str) {
-    fs::write(codex_home.join(format!("{kind}-request")), request).unwrap();
+    let path = codex_home.join(format!("{kind}-request"));
+    let temporary = path.with_extension("tmp");
+    fs::write(&temporary, request).unwrap();
+    fs::rename(temporary, path).unwrap();
     let answer = codex_home.join(format!("{kind}-response"));
     let start = std::time::Instant::now();
     while !answer.exists() {
@@ -141,6 +144,14 @@ fn main() {
                 }
                 if line.contains("Formuliere die Auswahl als Prosa aus") {
                     reply_from_file(&codex_home, "draft", turn_id, &line);
+                    continue;
+                }
+                if line.contains("Beantworte die Buchfrage ausschließlich") {
+                    reply_from_file(&codex_home, "research", turn_id, &line);
+                    continue;
+                }
+                if line.contains("Fasse die geprüften Textquellen") {
+                    reply_from_file(&codex_home, "research-summary", turn_id, &line);
                     continue;
                 }
                 if line.contains("Späte Antwort") {
