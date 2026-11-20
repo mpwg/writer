@@ -16,6 +16,15 @@
       "skillPath": "skills/gpui-kit-design-guides/SKILL.md",
       "computedHash": "20d2e41da0baab7881683869cec2ddeea6fb01ce429a84eb6de968883d53e7ca",
       "installMode": "copy"
+    },
+    "macos-app-design": {
+      "source": "petekp/agent-skills",
+      "ref": "0f90f074fd018ffbd7fab9d96d65fee23d44295d",
+      "commit": "0f90f074fd018ffbd7fab9d96d65fee23d44295d",
+      "sourceType": "github",
+      "skillPath": "skills/macos-app-design/SKILL.md",
+      "computedHash": "a2fa7fad9056d1f5f2b8b76e48018d75637b1f455ffb7ae1a7d9bb5992afd993",
+      "installMode": "copy"
     }
   }
 }

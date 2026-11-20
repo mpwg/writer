@@ -24,7 +24,7 @@ Die 26 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenste
 - Szenenübergreifende Änderung mit Rückgängig, Markdown und PDF nach einem simulierten Dialog sowie Weltkartei mit Quellensprung und persistiertem Figurenwissen.
 - Codex-Ansichten mit Testdaten für Opt-out, Gespräch, Entwurf, Recherche, Detailvorschläge und Konsistenzentscheidungen.
 
-Offen bleiben Prüfungen der plattformspezifischen Eingabemethoden im Betriebssystem und die nativen Windows- und Linux-Durchläufe.
+Im nativen macOS-Release-Build von `405cc98` zeigte die österreichische Tastaturbelegung nach `⌥U` das unbestätigte Trema im Editor. Es blieb auch nach Ablauf des Autosave-Intervalls außerhalb der Szenendatei. Nach `E` erschien `ë` im Editor und wurde als zusammengesetztes Zeichen automatisch gespeichert. Die nativen Windows- und Linux-Durchläufe stehen aus.
 
 ## Codex
 
