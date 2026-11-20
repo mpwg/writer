@@ -1358,7 +1358,7 @@ impl ProjectView {
                     .py_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().muted)
+                    .bg(cx.theme().title_bar)
                     .child(
                         Button::new("toggle-source-list")
                             .small()

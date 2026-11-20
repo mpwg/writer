@@ -10,7 +10,7 @@ fn main() {
     let app = application().with_assets(assets::Assets);
     app.on_reopen(open_workspace_window);
     app.run(|cx| {
-        init(cx);
+        init_writer(cx);
         cx.bind_keys(writer_key_bindings());
         ProjectView::install_quit_action(cx);
         #[cfg(target_os = "macos")]
@@ -32,6 +32,25 @@ fn main() {
         ]);
         open_workspace_window(cx);
     });
+}
+
+fn init_writer(cx: &mut App) {
+    use gpui_kit::component::{Theme, ThemeSet};
+    use std::rc::Rc;
+
+    init(cx);
+    let palette: ThemeSet = serde_json::from_str(include_str!("ui/desktop-colors.json"))
+        .expect("Die mitgelieferte Schreibwerkstatt-Palette muss gültig sein");
+    Theme::update(cx, |theme| {
+        for config in palette.themes {
+            if config.mode.is_dark() {
+                theme.dark_theme = Rc::new(config);
+            } else {
+                theme.light_theme = Rc::new(config);
+            }
+        }
+    });
+    Theme::sync_system_appearance(None, cx);
 }
 
 fn open_workspace_window(cx: &mut App) {
@@ -133,6 +152,27 @@ fn writer_key_bindings() -> [KeyBinding; 6] {
 mod tests {
     use super::ui;
     use gpui_kit::{AppContext, KeyBinding, KeyContext, Keymap, Keystroke};
+
+    #[gpui_kit::test]
+    fn desktop_palette_follows_light_and_dark_appearance(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::{
+            component::{ActiveTheme, Theme, ThemeMode},
+            rgb,
+        };
+
+        cx.update(|cx| {
+            super::init_writer(cx);
+            for (mode, ring, rail, ink) in [
+                (ThemeMode::Light, 0x244f7b, 0xe8ecf1, 0x212933),
+                (ThemeMode::Dark, 0xb4d4f6, 0x20252c, 0xedf0f5),
+            ] {
+                Theme::change(mode, None, cx);
+                assert_eq!(cx.theme().ring, rgb(ring).into());
+                assert_eq!(cx.theme().sidebar, rgb(rail).into());
+                assert_eq!(cx.theme().foreground, rgb(ink).into());
+            }
+        });
+    }
 
     #[gpui_kit::test]
     fn reopen_creates_a_project_picker_only_when_no_window_exists(

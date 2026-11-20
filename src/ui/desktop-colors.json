@@ -1,0 +1,61 @@
+{
+  "name": "Schreibwerkstatt",
+  "themes": [
+    {
+      "name": "Schreibwerkstatt Hell",
+      "mode": "light",
+      "colors": {
+        "background": "#ffffff",
+        "foreground": "#212933",
+        "border": "#c9d1db",
+        "muted.background": "#f3f5f7",
+        "muted.foreground": "#55616e",
+        "sidebar.background": "#e8ecf1",
+        "sidebar.foreground": "#212933",
+        "sidebar.border": "#c9d1db",
+        "title_bar.background": "#e1e6ec",
+        "status_bar.background": "#f3f5f7",
+        "status_bar.border": "#c9d1db",
+        "primary.background": "#244f7b",
+        "primary.foreground": "#ffffff",
+        "primary.hover.background": "#315e88",
+        "primary.active.background": "#1b3d62",
+        "secondary.active.background": "#d9e6f4",
+        "accent.background": "#d9e6f4",
+        "accent.foreground": "#244f7b",
+        "ring": "#244f7b",
+        "selection.background": "#bed6ef",
+        "warning.background": "#7a4d15",
+        "warning.foreground": "#fff5df"
+      }
+    },
+    {
+      "name": "Schreibwerkstatt Dunkel",
+      "mode": "dark",
+      "colors": {
+        "background": "#22262c",
+        "foreground": "#edf0f5",
+        "border": "#414b58",
+        "muted.background": "#282d35",
+        "muted.foreground": "#acb7c5",
+        "sidebar.background": "#20252c",
+        "sidebar.foreground": "#edf0f5",
+        "sidebar.border": "#414b58",
+        "title_bar.background": "#30363f",
+        "status_bar.background": "#282d35",
+        "status_bar.border": "#414b58",
+        "primary.background": "#b4d4f6",
+        "primary.foreground": "#20252c",
+        "primary.hover.background": "#c5e0fb",
+        "primary.active.background": "#9dbde1",
+        "secondary.active.background": "#344a61",
+        "accent.background": "#344a61",
+        "accent.foreground": "#b4d4f6",
+        "ring": "#b4d4f6",
+        "selection.background": "#405f80",
+        "warning.background": "#f2cc8a",
+        "warning.foreground": "#3c3123"
+      }
+    }
+  ]
+}
