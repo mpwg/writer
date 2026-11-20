@@ -11,7 +11,7 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `a804324` bestanden Formatprüfung, Clippy, alle 117 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `7bc9edd` bestanden Formatprüfung, Clippy, alle 118 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -19,7 +19,7 @@ Bei einer externen Änderung an der geöffneten Szene zeigte die App die beiden 
 
 ## GPUI-Komponententests
 
-Die 60 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
+Die 60 GPUI-Komponententests rendern die Produktionsansichten in GPUI-Testfenstern und simulieren Klicks, Tasten, Fokus, Ziehen, Scrollen und die Antworten der Dateidialoge. Ein zusätzlicher GPUI-Test prüft die helle und dunkle Anwendungspalette. Sie laufen über Cargo ohne Betriebssystemfenster und ohne Computer Use.
 
 - Projektwahl, Neuanlage und erstes Tab-Ziel sowie Timeline-Netz, Ereignisliste, Verkettung, Zyklusdiagnose und Kapitelwechsel per Tastatur oder Ziehen. Ereignisentwürfe bleiben nach dem Wechsel zu Kapitel oder Szene erhalten.
 - Die Kürzel für „Buchprojekt öffnen“ und „Neues Buchprojekt“ starten Ordnerdialog und Anlageformular. Vor einem Buchwechsel wird der Text gesichert. Bei einem Konflikt bleiben beide Fassungen zur Auflösung offen. Ein Abbruch der Neuanlage kehrt mit dem bisherigen Fokus zur Szene zurück. Die native Auslösung der Befehle über das macOS-Menü „Ablage“ ist noch offen.
@@ -43,7 +43,9 @@ Der [Desktop-UX-Entwurf](superpowers/specs/2026-11-20-schreibwerkstatt-ux-design
 - Durchsuchbare Weltkartei. Ein Quellensprung verwendet den aktuellen Dateistand. Bei doppelten Zitaten stehen die aktuellen Fundstellen mit Zeile und Spalte zur Auswahl.
 - Gespräch zum Ereignispaar, Konsistenzbefunde mit Quellensprüngen und Projekteinstellungen mit Rückkehr zur bisherigen Ansicht. Die KI-Anmeldung und Antworten laufen hier über die lokale Protokoll-Fixture.
 
-Ein nativer visueller Durchlauf des neuen Layouts, die nativen Windows- und Linux-Durchläufe und der vollständige Codex-Durchlauf mit persönlicher Anmeldung bleiben offen.
+Der native macOS-Release-Build von `a804324` öffnete die synthetische Kopie des Buchs über ⌘O und den Systemordnerdialog. Der Fenstertitel wechselte zwischen Timeline, Kapitel und Schreiben. Die Timeline zeigte die Quellliste, das Netz und das zeitlich offene Ereignis. Im schmalen Dokumentfenster zeigte die Vorschau „Eine Tür öffnet sich“ als beschriftetes Konzept neben gewöhnlicher Prosa. „Ablage → Speichern“ erzeugte genau den ersten Git-Commit des Testbuchs. Der dokumentweite Ablauf in den übrigen Ansichten, die nativen Windows- und Linux-Durchläufe und Codex mit persönlicher Anmeldung bleiben offen.
+
+Die Sichtprüfung zeigte noch die neutrale Standardpalette. Die danach eingebundene helle und dunkle Schreibwerkstatt-Palette wird über den GPUI-Theme-Wechsel auf Schieferblau, Quelllistenfarbe und Textfarbe geprüft. Die visuelle Prüfung der neuen Palette, einschließlich der Abgrenzung von Konzepten in der formatierten Vorschau, steht aus.
 
 ## Codex
 
