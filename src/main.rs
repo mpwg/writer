@@ -1,34 +1,50 @@
 mod ui;
 
 use gpui_kit::*;
-use ui::project::{ProjectView, SaveProject, UndoScene};
+use ui::project::{ProjectView, QuitWriter, SaveProject, UndoScene};
 
 fn main() {
-    application().with_assets(assets::Assets).run(|cx| {
+    let app = application().with_assets(assets::Assets);
+    app.on_reopen(open_workspace_window);
+    app.run(|cx| {
         init(cx);
         cx.bind_keys(writer_key_bindings());
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Schreibwerkstatt".into()),
-                ..Default::default()
-            }),
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(920.), px(680.)),
-                cx,
-            ))),
-            ..Default::default()
-        };
-        match open_window(options, cx, |window, cx| {
-            cx.new(|cx| ProjectView::new(window, cx))
-        }) {
-            Ok(_) => cx.activate(true),
-            Err(error) => {
-                eprintln!("Das Fenster konnte nicht geöffnet werden: {error}");
-                cx.quit();
-            }
-        }
+        ProjectView::install_quit_action(cx);
+        #[cfg(target_os = "macos")]
+        cx.set_menus([Menu::new("Schreibwerkstatt").items([
+            MenuItem::os_submenu("Dienste", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Schreibwerkstatt beenden", QuitWriter),
+        ])]);
+        open_workspace_window(cx);
     });
+}
+
+fn open_workspace_window(cx: &mut App) {
+    if !cx.windows().is_empty() {
+        return;
+    }
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some("Schreibwerkstatt".into()),
+            ..Default::default()
+        }),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(920.), px(680.)),
+            cx,
+        ))),
+        ..Default::default()
+    };
+    match open_window(options, cx, |window, cx| {
+        cx.new(|cx| ProjectView::new(window, cx))
+    }) {
+        Ok(_) => cx.activate(true),
+        Err(error) => {
+            eprintln!("Das Fenster konnte nicht geöffnet werden: {error}");
+            cx.quit();
+        }
+    }
 }
 
 fn editor_undo_shortcut() -> &'static str {
@@ -39,7 +55,7 @@ fn editor_undo_shortcut() -> &'static str {
     }
 }
 
-fn writer_key_bindings() -> [KeyBinding; 2] {
+fn writer_key_bindings() -> [KeyBinding; 3] {
     [
         KeyBinding::new(
             if cfg!(target_os = "macos") {
@@ -55,13 +71,51 @@ fn writer_key_bindings() -> [KeyBinding; 2] {
             UndoScene,
             Some("WriterScene > Input"),
         ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-q"
+            } else {
+                "ctrl-q"
+            },
+            QuitWriter,
+            None,
+        ),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::ui;
-    use gpui_kit::{KeyBinding, KeyContext, Keymap, Keystroke};
+    use gpui_kit::{AppContext, KeyBinding, KeyContext, Keymap, Keystroke};
+
+    #[gpui_kit::test]
+    fn reopen_creates_a_project_picker_only_when_no_window_exists(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use gpui_kit::test::TestWindowExt;
+
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
+            super::open_workspace_window(cx);
+        });
+        let original = cx.windows()[0];
+
+        cx.update(super::open_workspace_window);
+        assert_eq!(cx.windows().len(), 1);
+        cx.update_window(original, |_, window, _| window.remove_window())
+            .unwrap();
+        assert!(cx.windows().is_empty());
+
+        cx.update(super::open_workspace_window);
+        let [reopened]: [_; 1] = cx.windows().try_into().unwrap();
+        assert_ne!(reopened.window_id(), original.window_id());
+        cx.update_window(reopened, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.find("open").visible());
+        })
+        .unwrap();
+    }
 
     #[test]
     fn scene_undo_takes_precedence_only_in_the_scene_editor() {

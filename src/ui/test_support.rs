@@ -61,6 +61,7 @@ fn open_workspace(cx: &mut TestAppContext, with_project: bool) -> TestWorkspace 
     cx.update(|cx| {
         init(cx);
         cx.bind_keys(crate::writer_key_bindings());
+        ProjectView::install_quit_action(cx);
     });
     let (window, view) = mount_view(cx, with_project.then_some(root.as_path()));
     TestWorkspace {
@@ -325,6 +326,114 @@ fn conflict_resolution_survives_reopening_the_book_in_a_new_view(cx: &mut TestAp
         assert!(!text.contains("Interne Fassung."));
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn application_shutdown_flushes_pending_scene_text(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let path = workspace.root.join("Manuskript/Signal.md");
+    let original = fs::read(&path).unwrap();
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input("Sofort beendet. ", cx);
+    })
+    .unwrap();
+    assert_eq!(fs::read(&path).unwrap(), original);
+
+    cx.update(gpui_kit::App::shutdown);
+
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("Sofort beendet.")
+    );
+}
+
+#[gpui_kit::test]
+fn quit_shortcut_keeps_the_conflicting_scene_open(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+
+    let (workspace, path, external) = edit_scene_with_external_changes(cx);
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-q"
+            } else {
+                "ctrl-q"
+            },
+            cx,
+        );
+    })
+    .unwrap();
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .try_find("keep-app")
+                .is_some_and(|button| button.visible())
+        );
+        assert!(
+            window
+                .try_find("keep-disk")
+                .is_some_and(|button| button.visible())
+        );
+    })
+    .unwrap();
+
+    assert_eq!(fs::read_to_string(path).unwrap(), external);
+    workspace.update(cx, |view, _, cx| {
+        assert!(
+            view.editor
+                .read(cx)
+                .value()
+                .contains("In der App bearbeitet.")
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn app_quit_command_checks_for_conflicts_without_editor_focus(cx: &mut TestAppContext) {
+    let (workspace, path, external) = edit_scene_with_external_changes(cx);
+    cx.update_window(workspace.window, |_, window, cx| window.blur(cx))
+        .unwrap();
+
+    cx.update(|cx| cx.dispatch_action(&super::QuitWriter));
+
+    assert_eq!(fs::read_to_string(path).unwrap(), external);
+    workspace.update(cx, |view, _, _| {
+        let conflict = view.store.as_ref().unwrap().conflict();
+        assert!(
+            conflict.is_some(),
+            "Die App muss den Konflikt beim Beenden anzeigen"
+        );
+        assert!(
+            String::from_utf8_lossy(&conflict.unwrap().in_app).contains("In der App bearbeitet.")
+        );
+    });
+}
+
+fn edit_scene_with_external_changes(cx: &mut TestAppContext) -> (TestWorkspace, PathBuf, String) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let path = workspace.root.join("Manuskript/Signal.md");
+    workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
+    let external = format!(
+        "{}\nAußerhalb bearbeitet.",
+        fs::read_to_string(&path).unwrap()
+    );
+    fs::write(&path, &external).unwrap();
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input("In der App bearbeitet. ", cx);
+    })
+    .unwrap();
+    (workspace, path, external)
 }
 
 #[gpui_kit::test]

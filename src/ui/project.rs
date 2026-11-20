@@ -14,7 +14,7 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
 };
 use gpui_kit::{prelude::FluentBuilder, *};
-actions!(writer_actions, [SaveProject, UndoScene]);
+actions!(writer_actions, [SaveProject, UndoScene, QuitWriter]);
 
 use writer::{
     Id, Project,
@@ -33,6 +33,7 @@ enum Page {
 
 pub struct ProjectView {
     keyboard_focus: FocusHandle,
+    _quit_subscription: Subscription,
     title: Entity<InputState>,
     destination: Entity<InputState>,
     picked_destination: Option<PathBuf>,
@@ -71,6 +72,35 @@ pub struct ProjectView {
 }
 
 impl ProjectView {
+    pub(crate) fn install_quit_action(cx: &mut App) {
+        cx.on_action(|_: &QuitWriter, cx| {
+            // Tastaturaktionen laufen in einem Fenster-Update. Erst danach sind alle Fenster zugänglich.
+            cx.defer(|cx| {
+                let saved = cx
+                    .windows()
+                    .into_iter()
+                    .filter_map(|handle| handle.downcast::<base::Root>())
+                    .all(|handle| {
+                        handle
+                            .update(cx, |root, window, cx| {
+                                let Ok(view) = root.view().clone().downcast::<Self>() else {
+                                    return true;
+                                };
+                                let saved = view.update(cx, |view, cx| view.flush(cx));
+                                if !saved {
+                                    window.activate_window();
+                                }
+                                saved
+                            })
+                            .unwrap_or(false)
+                    });
+                if saved {
+                    cx.quit();
+                }
+            });
+        });
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| TextareaState::new(window, cx).rows(16));
         cx.subscribe_in(
@@ -91,8 +121,17 @@ impl ProjectView {
         window.on_window_should_close(cx, move |_, cx| {
             view.update(cx, |view, cx| view.flush(cx)).unwrap_or(true)
         });
+        let quit_subscription = cx.on_app_quit(|view, cx| {
+            if !view.flush(cx)
+                && let Some(error) = &view.error
+            {
+                eprintln!("Ausstehende Buchänderungen konnten nicht gesichert werden. {error}");
+            }
+            std::future::ready(())
+        });
         Self {
             keyboard_focus,
+            _quit_subscription: quit_subscription,
             store: None,
             editor,
             merge,
