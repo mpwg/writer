@@ -19,6 +19,69 @@ fn codex_window<R>(
 }
 
 #[gpui_kit::test]
+fn timeline_brainstorm_switches_to_the_selected_event_pair(cx: &mut TestAppContext) {
+    let workspace = test_support::open(cx);
+    cx.simulate_window_resize(workspace.window, size(px(1440.), px(1600.)));
+    let project = Project::open(&workspace.root).unwrap();
+    let timeline = Timeline::from_project(&project);
+    let event = |title: &str| {
+        timeline
+            .ordered_events()
+            .into_iter()
+            .find(|event| event.title == title)
+            .unwrap()
+            .id
+    };
+    let first = event("Erstkontakt");
+    let second = event("Aufbruch");
+    let other = event("Fristablauf");
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 5_usize), cx);
+        window.click(format!("brainstorm-first-{first}"), cx);
+        window.click(format!("brainstorm-second-{second}"), cx);
+    });
+    let message = workspace.update(cx, |view, window, cx| {
+        let pair = view.ai.brainstorm.as_ref().unwrap().pair();
+        view.complete_ai(
+            Pending::Brainstorm {
+                pair,
+                prompt: "Was kommt danach?".into(),
+                retried: false,
+            },
+            "Die Wache öffnet den Seiteneingang.".into(),
+            None,
+            window,
+            cx,
+        );
+        view.ai.brainstorm.as_ref().unwrap().messages()[0].id
+    });
+    let message_button = format!("message-{message}");
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(("page", 0_usize), cx);
+        window.click(format!("event-{first}"), cx);
+        window.click("brainstorm-from-event", cx);
+        assert!(window.find(message_button.clone()).visible());
+
+        window.click(("page", 0_usize), cx);
+        window.click(format!("event-{other}"), cx);
+        window.click("brainstorm-from-event", cx);
+        assert!(window.try_find("send-chat").is_none());
+        assert!(window.try_find(message_button.clone()).is_none());
+        window.click(format!("brainstorm-second-{second}"), cx);
+        assert!(window.find("send-chat").visible());
+        assert!(window.try_find(message_button.clone()).is_none());
+
+        window.click(format!("brainstorm-first-{second}"), cx);
+        window.click(format!("brainstorm-second-{first}"), cx);
+        assert!(window.try_find(message_button.clone()).is_some());
+        window.click(message_button, cx);
+        window.click(format!("brainstorm-second-{first}"), cx);
+        assert!(window.find("mark-idea").visible());
+    });
+}
+
+#[gpui_kit::test]
 fn brainstorm_promotes_only_the_selected_passage_with_the_chosen_link(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     cx.simulate_window_resize(workspace.window, size(px(1440.), px(1600.)));
@@ -399,6 +462,7 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
             .id
     };
     let pair = [event("Erstkontakt"), event("Aufbruch")];
+    let other = event("Fristablauf");
 
     workspace.update(cx, |view, _, _| {
         view.ai.session = AiSession::with_preferences(&preferences);
@@ -444,6 +508,17 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
         window.input(prompt, cx);
         assert_ne!(window.find("send-chat").disabled(), Some(true));
         window.click("send-chat", cx);
+
+        window.click(("page", 0_usize), cx);
+        window.click(format!("event-{other}"), cx);
+        window.click("brainstorm-from-event", cx);
+        assert!(window.find("interrupt").visible());
+        assert!(
+            window
+                .try_find(format!("brainstorm-second-{}", pair[0]))
+                .is_none()
+        );
+        assert!(window.find(format!("brainstorm-second-{other}")).visible());
     });
     wait_for(cx, |cx| {
         workspace.update(cx, |view, _, _| {

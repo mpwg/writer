@@ -172,10 +172,7 @@ impl Assistance {
     pub(super) fn reset(&mut self, window: &mut Window, cx: &mut Context<ProjectView>) {
         self.stop();
         self.pair_seed = None;
-        self.brainstorm = None;
-        self.brainstorm_message = None;
-        self.idea = None;
-        self.links.clear();
+        self.clear_brainstorm();
         self.at = None;
         self.status = None;
         self.answers.clear();
@@ -187,6 +184,13 @@ impl Assistance {
         }
         self.note
             .update(cx, |field, cx| field.set_value("", window, cx));
+    }
+
+    fn clear_brainstorm(&mut self) {
+        self.brainstorm = None;
+        self.brainstorm_message = None;
+        self.idea = None;
+        self.links.clear();
     }
 
     fn stop(&mut self) {
@@ -489,7 +493,7 @@ impl ProjectView {
         let Some(project) = &self.project else { return };
         let pair = project.document(id).and_then(Brainstorm::pair_for_document);
         if let Some([a, b]) = pair {
-            self.ai.pair_seed = Some(a);
+            self.select_pair_seed(a, cx);
             self.open_pair(b, cx);
             if let Some(message) = message {
                 self.open_chat_message(message, window, cx);
@@ -501,23 +505,47 @@ impl ProjectView {
     }
 
     pub(super) fn start_pair(&mut self, event: Id, window: &mut Window, cx: &mut Context<Self>) {
-        self.ai.pair_seed = Some(event);
         self.navigate(Page::Codex, window, cx);
+        if self.page == Page::Codex {
+            self.select_pair_seed(event, cx);
+        }
+    }
+
+    fn select_pair_seed(&mut self, event: Id, cx: &mut Context<Self>) {
+        if self.ai.pending.is_none() && self.ai.pair_seed != Some(event) {
+            self.ai.pair_seed = Some(event);
+            self.ai.clear_brainstorm();
+            cx.notify();
+        }
     }
 
     fn open_pair(&mut self, second: Id, cx: &mut Context<Self>) {
         if self.ai.pending.is_some() {
             return;
         }
-        let Some((project, seed)) = self.project.as_ref().zip(self.ai.pair_seed) else {
+        let Some(seed) = self.ai.pair_seed else {
             return;
         };
-        match Brainstorm::open(project, [seed, second]) {
+        let mut pair = [seed, second];
+        pair.sort_unstable();
+        if self
+            .ai
+            .brainstorm
+            .as_ref()
+            .is_some_and(|chat| chat.pair() == pair)
+        {
+            return;
+        }
+        self.ai.clear_brainstorm();
+        if let Err(error) = self.refresh_project() {
+            self.ai.status = Some(error.to_string());
+            cx.notify();
+            return;
+        }
+        let Some(project) = &self.project else { return };
+        match Brainstorm::open(project, pair) {
             Ok(chat) => {
                 self.ai.brainstorm = Some(chat);
-                self.ai.brainstorm_message = None;
-                self.ai.idea = None;
-                self.ai.links.clear();
                 self.ai.status = None;
             }
             Err(error) => self.ai.status = Some(error.to_string()),
@@ -1474,14 +1502,7 @@ impl ProjectView {
                         .label(event.title.clone())
                         .disabled(self.ai.pending.is_some())
                         .when(self.ai.pair_seed == Some(id), |button| button.primary())
-                        .on_click(cx.listener(move |view, _, _, cx| {
-                            view.ai.pair_seed = Some(id);
-                            view.ai.brainstorm = None;
-                            view.ai.brainstorm_message = None;
-                            view.ai.idea = None;
-                            view.ai.links.clear();
-                            cx.notify();
-                        }))
+                        .on_click(cx.listener(move |view, _, _, cx| view.select_pair_seed(id, cx)))
                 }),
             ))
             .when_some(self.ai.pair_seed, |panel, seed| {
