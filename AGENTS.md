@@ -1,5 +1,9 @@
 # Arbeitsweise für die Schreibwerkstatt
 
+## Umsetzungsaufträge
+
+- Lege jeden Umsetzungsauftrag zu Beginn als Goal im aktuellen Chat an. Formuliere das angestrebte Ergebnis und markiere das Goal nach erfolgreicher Prüfung als abgeschlossen.
+
 ## Skills und Delegation
 
 - Lade für jede Rust-Aufgabe die einschlägigen Rust-Skills. Nutze beispielsweise `idiomatic-rust` für neue Rust-Implementierungen und `rust-testing` für Rust-Tests.
