@@ -537,71 +537,155 @@ fn native_key_dispatch_undoes_a_long_scene_edit_and_persists_the_previous_text(
 
 #[gpui_kit::test]
 fn concept_decoration_survives_unicode_edit_undo_and_reopen(cx: &mut TestAppContext) {
-    use gpui_kit::test::TestWindowExt;
+    for (original, selected, replacement, edited) in [
+        (
+            "Eine Tür öffnet sich.",
+            "Tür",
+            "Luke",
+            "Eine Luke öffnet sich.",
+        ),
+        (
+            "Eine Tu\u{308}r öffnet sich.",
+            "Tu\u{308}",
+            "Tü",
+            "Eine Tür öffnet sich.",
+        ),
+    ] {
+        assert_concept_edit_roundtrip(cx, original, selected, replacement, edited);
+    }
+}
 
+fn assert_concept_edit_roundtrip(
+    cx: &mut TestAppContext,
+    original_sentence: &str,
+    selected: &str,
+    replacement: &str,
+    edited_sentence: &str,
+) {
+    use gpui_kit::test::TestWindowExt;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    const ORDINARY_LIST_ITEM: &str = "Gewöhnliche Liste";
+    let ordinary_list = format!("- {ORDINARY_LIST_ITEM}");
     let workspace = open(cx);
     let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
     let concept_id = Id::from_u128(0x00000000_0000_4000_8000_000000000008);
     let path = workspace.root.join("Manuskript/Signal.md");
-    let original = format!(
-        "{}\n- Gewöhnliche Liste\n",
-        fs::read_to_string(&path).unwrap()
-    );
+    let original = fs::read_to_string(&path)
+        .unwrap()
+        .replace("Eine Tür öffnet sich.", original_sentence)
+        .replace(
+            "Danach verstummt die Antenne.",
+            &format!("\n{ordinary_list}"),
+        );
     fs::write(&path, &original).unwrap();
-    let assert_range = |workspace: &TestWorkspace, cx: &mut TestAppContext, sentence: &str| {
-        workspace.update(cx, |view, _, cx| {
-            let editor = view.editor.read(cx);
-            assert_eq!(editor.decorations().len(), 1);
-            assert_eq!(editor.decorations()[0].range, 0..sentence.len());
-            assert_eq!(&editor.value()[..sentence.len()], sentence);
-        });
+    let assert_editor = |view: &ProjectView, cx: &gpui_kit::App, sentence: &str| {
+        let editor = view.editor.read(cx);
+        assert_eq!(editor.decorations().len(), 1);
+        assert_eq!(editor.decorations()[0].range, 0..sentence.len());
+        assert_eq!(editor.value(), format!("{sentence}\n\n{ordinary_list}\n"));
+    };
+    let assert_preview = |window: &mut Window, cx: &mut gpui_kit::App, sentence: &str| {
+        assert!(window.find("scene-preview").visible());
+        window.click_at("scene-preview", point(px(20.), px(10.)), cx);
+        // Der TextView kopiert den gerenderten Klartext ohne Markdown-Markup.
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(String::new()));
+        window.press("secondary-a", cx);
+        window.press("secondary-c", cx);
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .expect("Die Vorschau hat ihren Text in die Zwischenablage kopiert");
+        assert_eq!(
+            copied
+                .lines()
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>(),
+            ["Konzept", sentence, ORDINARY_LIST_ITEM],
+        );
     };
 
-    workspace.update(cx, |view, window, cx| {
-        view.refresh_project().unwrap();
-        view.select_scene(id, window, cx);
-    });
-    let old_sentence = "Eine Tür öffnet sich.";
-    assert_range(&workspace, cx, old_sentence);
+    workspace.update(cx, |view, _, _| view.refresh_project().unwrap());
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{id}"), cx);
+        window.click("outline-edit-scene", cx);
+        assert_editor(workspace.view.read(cx), cx, original_sentence);
+        window.click("preview", cx);
+        assert_preview(window, cx, original_sentence);
+    })
+    .unwrap();
 
     cx.update_window(workspace.window, |_, window, cx| {
-        window.click("preview", cx);
-        assert!(window.find("scene-preview").visible());
+        let editor = &workspace.view.read(cx).editor;
+        window.click(("input", editor.entity_id()), cx);
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-up"
+            } else {
+                "ctrl-home"
+            },
+            cx,
+        );
+        for _ in "Eine ".chars() {
+            window.press("right", cx);
+        }
+        for _ in selected.graphemes(true) {
+            window.press("shift-right", cx);
+        }
+        let editor = workspace.view.read(cx).editor.read(cx);
+        assert_eq!(&editor.value()[editor.selected_range()], selected);
+        window.input(replacement, cx);
     })
     .unwrap();
-    workspace.update(cx, |view, window, cx| {
-        view.editor.update(cx, |editor, cx| {
-            editor.set_selected_range(5..9, cx);
-            editor.focus(window, cx);
-        });
-    });
+
     cx.update_window(workspace.window, |_, window, cx| {
-        window.input("Tu\u{308}re", cx)
+        let view = workspace.view.read(cx);
+        assert_editor(view, cx, edited_sentence);
+        assert_preview(window, cx, edited_sentence);
     })
     .unwrap();
-    let edited_sentence = "Eine Tu\u{308}re öffnet sich.";
-    assert_range(&workspace, cx, edited_sentence);
     workspace.update(cx, |view, _, cx| assert!(view.flush(cx)));
 
     let reopened = Project::open(&workspace.root).unwrap();
     let text = writer::passage::SceneText::from_markdown(id, reopened.scene(id).unwrap().body());
+    assert_eq!(text.concepts().len(), 1);
     assert_eq!(text.concepts()[0].id, concept_id);
+    assert_eq!(
+        &text.text()[text.concepts()[0].range.clone()],
+        edited_sentence
+    );
+    // Beim Kopieren aus der Vorschau entfallen die Listen- und Zitatzeichen.
     let preview = writer::export::preview_markdown(&text);
-    assert!(preview.contains(&format!("> **Konzept**\n>\n> {edited_sentence}")));
-    assert!(preview.lines().any(|line| line == "- Gewöhnliche Liste"));
+    assert!(preview.starts_with(&format!("> **Konzept**\n>\n> {edited_sentence}\n\n")));
+    assert!(preview.lines().any(|line| line == ordinary_list));
 
-    cx.simulate_keystrokes(workspace.window, crate::editor_undo_shortcut());
-    assert_range(&workspace, cx, old_sentence);
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.press(crate::editor_undo_shortcut(), cx);
+        assert_editor(workspace.view.read(cx), cx, original_sentence);
+        assert_preview(window, cx, original_sentence);
+    })
+    .unwrap();
     workspace.update(cx, |view, _, cx| assert!(view.flush(cx)));
     assert_eq!(fs::read_to_string(path).unwrap(), original);
 
-    let (window, fresh_view) = mount_view(cx, Some(&workspace.root));
+    let (window, fresh_view) = mount_view(cx, None);
+    cx.update_window(workspace.window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.update_window(window, |_, window, cx| window.click("open", cx))
+        .unwrap();
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
     cx.update_window(window, |_, window, cx| {
-        fresh_view.update(cx, |view, cx| view.select_scene(id, window, cx));
-        let editor = fresh_view.read(cx).editor.read(cx);
-        assert_eq!(editor.decorations().len(), 1);
-        assert_eq!(editor.decorations()[0].range, 0..old_sentence.len());
-        assert!(editor.value().starts_with(old_sentence));
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{id}"), cx);
+        window.click("outline-edit-scene", cx);
+        assert_editor(fresh_view.read(cx), cx, original_sentence);
+        window.click("preview", cx);
+        assert_preview(window, cx, original_sentence);
+        window.remove_window();
     })
     .unwrap();
 }
