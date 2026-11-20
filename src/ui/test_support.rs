@@ -46,17 +46,7 @@ fn open_workspace(cx: &mut TestAppContext, with_project: bool) -> TestWorkspace 
         &["config", "user.name", "Komponententest"],
         &["config", "user.email", "komponententest@example.invalid"],
     ] {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&root)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        git(&root, args);
     }
     cx.update(|cx| {
         init(cx);
@@ -112,6 +102,21 @@ fn copy_project(source: &Path, target: &Path) {
             fs::copy(entry.path(), destination).unwrap();
         }
     }
+}
+
+fn git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
 }
 
 #[gpui_kit::test]
@@ -176,6 +181,101 @@ fn document_status_distinguishes_autosave_from_a_local_version(cx: &mut TestAppC
             assert!(window.try_find("changes-since-version").is_none());
         })
         .unwrap();
+}
+
+#[gpui_kit::test]
+fn switching_scenes_saves_text_and_reopening_keeps_it_unversioned_until_save(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::test::TestWindowExt;
+
+    let workspace = open(cx);
+    let scene = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
+    let next_scene = Id::from_u128(0x00000000_0000_4000_8000_000000000006);
+    let scene_path = workspace.root.join("Manuskript/Signal.md");
+    let original = fs::read_to_string(&scene_path).unwrap();
+    let initial = Store::new(&workspace.root)
+        .unwrap()
+        .checkpoint("Ausgangsfassung")
+        .unwrap();
+
+    let edit = "Eine zweite Tür öffnet sich. ";
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{scene}"), cx);
+        window.click("outline-edit-scene", cx);
+        window.click(("input", workspace.view.read(cx).editor.entity_id()), cx);
+        window.input(edit, cx);
+    })
+    .unwrap();
+    assert_eq!(fs::read_to_string(&scene_path).unwrap(), original);
+
+    // Die Eingabe wird nach dem Fenster-Update zugestellt. Die Testuhr bleibt stehen.
+    cx.update_window(workspace.window, |_, window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{next_scene}"), cx);
+        window.click("outline-edit-scene", cx);
+        assert_eq!(workspace.view.read(cx).selected_scene, Some(next_scene));
+    })
+    .unwrap();
+    let saved = fs::read_to_string(&scene_path).unwrap();
+    assert!(
+        saved.contains(edit),
+        "Dateifassung nach dem Wechsel: {saved:?}"
+    );
+    assert_eq!(
+        git(&workspace.root, &["rev-parse", "HEAD"]).trim(),
+        initial.id
+    );
+    assert_eq!(
+        git(&workspace.root, &["show", "HEAD:Manuskript/Signal.md"]),
+        original
+    );
+
+    let (fresh_window, fresh_view) = mount_view(cx, None);
+    cx.update_window(workspace.window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.update_window(fresh_window, |_, window, cx| window.click("open", cx))
+        .unwrap();
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
+
+    cx.update_window(fresh_window, |_, window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{scene}"), cx);
+        window.click("outline-edit-scene", cx);
+        let editor = fresh_view.read(cx).editor.entity_id();
+        assert!(
+            window
+                .find(("input", editor))
+                .value()
+                .unwrap()
+                .contains(edit)
+        );
+        assert!(window.find("changes-since-version").visible());
+        assert_eq!(
+            git(&workspace.root, &["rev-parse", "HEAD"]).trim(),
+            initial.id
+        );
+        assert_eq!(window.find("checkpoint").label(), Some("Speichern"));
+        window.double_click("checkpoint", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(
+        git(&workspace.root, &["rev-list", "--count", "HEAD"]).trim(),
+        "2"
+    );
+    assert_eq!(
+        git(&workspace.root, &["rev-parse", "HEAD^"]).trim(),
+        initial.id
+    );
+    assert_eq!(
+        git(&workspace.root, &["show", "HEAD:Manuskript/Signal.md"]),
+        saved
+    );
 }
 
 #[gpui_kit::test]
@@ -917,26 +1017,15 @@ fn save_shortcut_creates_one_local_version_after_retrying_a_locked_index(cx: &mu
 
     let workspace = open(cx);
     let id = Id::from_u128(0x00000000_0000_4000_8000_000000000007);
-    let git = |args: &[&str]| {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&workspace.root)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap()
-    };
+    let git = |args: &[&str]| git(&workspace.root, args);
     let initial = Store::new(&workspace.root)
         .unwrap()
         .checkpoint("Ausgangsfassung")
         .unwrap();
-    fs::write(workspace.root.join("fremd.txt"), "Fremd").unwrap();
+    let outside_book = workspace.root.join("fremd.txt");
+    fs::write(&outside_book, "Vorgemerkter Inhalt\n").unwrap();
     git(&["add", "fremd.txt"]);
+    fs::write(&outside_book, "Externe Bearbeitung\n").unwrap();
     let index_lock = workspace.root.join(".git/index.lock");
     fs::write(&index_lock, []).unwrap();
     workspace.update(cx, |view, window, cx| view.select_scene(id, window, cx));
@@ -951,13 +1040,12 @@ fn save_shortcut_creates_one_local_version_after_retrying_a_locked_index(cx: &mu
         "ctrl-s"
     };
     cx.simulate_keystrokes(workspace.window, shortcut);
+    cx.simulate_keystrokes(workspace.window, shortcut);
     cx.run_until_parked();
     workspace.update(cx, |view, _, _| {
-        assert!(
-            view.error
-                .as_deref()
-                .is_some_and(|error| error.contains("Lokale Version"))
-        );
+        assert!(view.error.as_deref().is_some_and(|error| {
+            error.contains("Lokale Version") && error.contains("index.lock")
+        }));
     });
     let scene_path = "Manuskript/Signal.md";
     let disk_text = fs::read_to_string(workspace.root.join(scene_path)).unwrap();
@@ -968,6 +1056,7 @@ fn save_shortcut_creates_one_local_version_after_retrying_a_locked_index(cx: &mu
     fs::remove_file(index_lock).unwrap();
     cx.simulate_keystrokes(workspace.window, shortcut);
     cx.run_until_parked();
+    workspace.update(cx, |view, _, _| assert!(view.error.is_none()));
     assert_eq!(git(&["show", "HEAD:Manuskript/Signal.md"]), disk_text);
     cx.simulate_keystrokes(workspace.window, shortcut);
     cx.run_until_parked();
@@ -975,6 +1064,11 @@ fn save_shortcut_creates_one_local_version_after_retrying_a_locked_index(cx: &mu
     assert_eq!(
         git(&["diff", "--cached", "--name-only"]).trim(),
         "fremd.txt"
+    );
+    assert_eq!(git(&["show", ":fremd.txt"]), "Vorgemerkter Inhalt\n");
+    assert_eq!(
+        fs::read_to_string(outside_book).unwrap(),
+        "Externe Bearbeitung\n"
     );
     assert!(!git(&["ls-tree", "--name-only", "HEAD"]).contains("fremd.txt"));
 }
