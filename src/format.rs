@@ -8,6 +8,8 @@ pub(crate) const VERSION: u32 = 1;
 pub(crate) struct Manifest {
     pub title: String,
     pub format_version: u32,
+    #[serde(default)]
+    pub id: Option<Id>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -21,9 +23,11 @@ pub enum DocumentKind {
     Concept,
     Idea,
     Brainstorm,
+    DraftConversation,
+    ConsistencyDecision,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(crate) struct Frontmatter {
     pub id: Id,
     pub kind: DocumentKind,

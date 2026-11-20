@@ -11,8 +11,8 @@ use crate::{
     format::{Frontmatter, Manifest, VERSION, split_document},
 };
 
-const MANIFEST: &str = "project.yaml";
-const DIRECTORIES: [&str; 4] = ["Planung", "Manuskript", "Welt", "Brainstorming"];
+pub(crate) const MANIFEST: &str = "project.yaml";
+pub(crate) const DIRECTORIES: [&str; 4] = ["Planung", "Manuskript", "Welt", "Brainstorming"];
 
 pub type Result<T> = std::result::Result<T, ProjectError>;
 
@@ -30,6 +30,8 @@ pub enum ProjectError {
     Occupied(PathBuf),
     #[error("Gib einen Buchtitel ein.")]
     EmptyTitle,
+    #[error("{path}: {reason}")]
+    Storage { path: PathBuf, reason: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,11 +48,13 @@ pub enum ProjectIssue {
     ExpectedScene { path: PathBuf, target: Id },
 }
 
+#[derive(Clone)]
 pub struct Document {
     path: PathBuf,
     metadata: Frontmatter,
     frontmatter: String,
     body: String,
+    original: String,
 }
 
 impl Document {
@@ -76,6 +80,9 @@ impl Document {
     pub fn body(&self) -> &str {
         &self.body
     }
+    pub(crate) fn original(&self) -> &str {
+        &self.original
+    }
     pub fn scenes(&self) -> &[Id] {
         &self.metadata.scenes
     }
@@ -85,6 +92,7 @@ impl Document {
 }
 
 pub struct Project {
+    id: Option<Id>,
     root: PathBuf,
     title: String,
     documents: BTreeMap<Id, Document>,
@@ -101,6 +109,7 @@ impl Project {
         let yaml = serde_saphyr::to_string(&Manifest {
             title: title.into(),
             format_version: VERSION,
+            id: Some(Id::new_v4()),
         })
         .map_err(|err| ProjectError::InvalidManifest {
             path: manifest_path.clone(),
@@ -149,6 +158,7 @@ impl Project {
             }
         }
         result?;
+        crate::version::initialize(root)?;
         Self::open(root)
     }
 
@@ -246,11 +256,18 @@ impl Project {
         Ok(Self {
             root: root.into(),
             title: manifest.title,
+            id: manifest.id,
             documents,
             issues,
         })
     }
 
+    pub fn id(&self) -> Option<Id> {
+        self.id
+    }
+    pub fn documents(&self) -> impl Iterator<Item = &Document> {
+        self.documents.values()
+    }
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -279,7 +296,7 @@ impl Project {
     }
 }
 
-fn io_error(path: &Path, source: io::Error) -> ProjectError {
+pub(crate) fn io_error(path: &Path, source: io::Error) -> ProjectError {
     ProjectError::Io {
         path: path.into(),
         source,
@@ -336,5 +353,6 @@ fn read_document(path: &Path) -> std::result::Result<Document, String> {
         metadata,
         frontmatter: frontmatter.into(),
         body: body.into(),
+        original: text,
     })
 }
