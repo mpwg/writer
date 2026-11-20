@@ -30,7 +30,7 @@ fn book(root: &Path) -> Manuscript {
         "A.md",
         30,
         "chapter",
-        &format!("scenes: [{first}]\n"),
+        &format!("title: Aufbruch\nscenes: [{first}]\n"),
         "",
     );
     document(
@@ -38,7 +38,7 @@ fn book(root: &Path) -> Manuscript {
         "B.md",
         31,
         "chapter",
-        &format!("scenes: [{second}]\n"),
+        &format!("title: Rückblende\nscenes: [{second}]\n"),
         "",
     );
     document(
@@ -135,8 +135,10 @@ fn both_exports_keep_chapter_order_and_show_concepts_with_umlauts() {
     let temp = tempfile::tempdir().unwrap();
     let mut book = book(temp.path());
     let second = Id::from_u128(SECOND);
+    let continuation = "Die Wellen glitzern. Eine Möwe überquert den Fluss.";
+    let paragraphs = 100;
     let source = "\n\n#panic(\"Wortwörtlich\")\n\n".to_owned()
-        + &"Die Wellen glitzern. Eine Möwe überquert den Fluss.\n\n".repeat(100)
+        + &format!("{continuation}\n\n").repeat(paragraphs)
         + "Schlusswort";
     let second_text = &book.scene(second).unwrap().text;
     let start = second_text.anchor(0.."Die Tür öffnet sich.".len()).unwrap();
@@ -149,34 +151,67 @@ fn both_exports_keep_chapter_order_and_show_concepts_with_umlauts() {
     let md = temp.path().join("Buch.md");
     export(&book, ExportFormat::Markdown, &md).unwrap();
     let md = fs::read_to_string(md).unwrap();
-    assert!(md.contains("# A"));
-    assert!(md.contains("# B"));
+    assert!(md.contains("## Aufbruch\n\nEin Schiff fährt hinaus."));
+    assert!(md.contains("## Rückblende\n\n> **Konzept**\n>\n> Die Tür öffnet sich."));
     assert!(!md.contains("writer:concept"));
-    assert!(md.contains("Konzept"));
-    assert!(md.find("Schiff").unwrap() < md.find("Tür").unwrap());
+    assert!(md.find("## Aufbruch").unwrap() < md.find("## Rückblende").unwrap());
+    assert_eq!(md.matches(continuation).count(), paragraphs);
 
     let pdf = temp.path().join("Buch.pdf");
     export(&book, ExportFormat::Pdf, &pdf).unwrap();
     let pages = pdf_extract::extract_text_by_pages(&pdf).unwrap();
-    assert!(pages.len() > 1, "Das Kapitel soll über Seiten umbrechen");
-    let text = pages.join("\n");
-    assert!(text.contains("Über den Fluss"), "{text}");
-    assert!(text.contains("Konzept"));
-    assert!(text.contains("Wortwörtlich"));
-    assert!(text.contains("Schlusswort"));
-    assert!(text.find("Schiff").unwrap() < text.find("Tür").unwrap());
+    let pages: Vec<_> = pages
+        .iter()
+        .map(|page| page.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let first_page = &pages[0];
+    let positions = [
+        "Über den Fluss",
+        "Aufbruch",
+        "Ein Schiff fährt hinaus.",
+        "Rückblende",
+        "Konzept Die Tür öffnet sich.",
+        "Wortwörtlich",
+    ]
+    .map(|excerpt| {
+        first_page
+            .find(excerpt)
+            .unwrap_or_else(|| panic!("Der Auszug {excerpt:?} fehlt auf der ersten Seite"))
+    });
+    assert!(
+        positions.is_sorted(),
+        "Die Erzählreihenfolge ist vertauscht"
+    );
+    let last_page = pages.last().unwrap();
+    assert!(
+        last_page.contains("Schlusswort"),
+        "Das Ende der Rückblende fehlt auf der letzten Seite"
+    );
+    assert!(
+        first_page.contains(continuation)
+            && !first_page.contains("Schlusswort")
+            && last_page.contains(continuation),
+        "Die Rückblende soll über mehrere Seiten laufen"
+    );
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page.matches(continuation).count())
+            .sum::<usize>(),
+        paragraphs
+    );
 }
 
 #[test]
 fn failed_pdf_export_leaves_the_previous_target_byte_for_byte() {
     let temp = tempfile::tempdir().unwrap();
     let mut book = book(temp.path());
+    let pdf = temp.path().join("Buch.pdf");
+    export(&book, ExportFormat::Pdf, &pdf).unwrap();
+    let previous = fs::read(&pdf).unwrap();
     let deeply_nested = "> ".repeat(64) + "Tiefe Verschachtelung";
     book.edit_scene(Id::from_u128(SECOND), &deeply_nested)
         .unwrap();
-    let pdf = temp.path().join("Buch.pdf");
-    let previous = "Unveränderte bisherige Ausgabe".as_bytes();
-    fs::write(&pdf, previous).unwrap();
     assert!(matches!(
         export(&book, ExportFormat::Pdf, &pdf),
         Err(ExportError::MarkdownDepth)
