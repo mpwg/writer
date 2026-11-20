@@ -324,7 +324,7 @@ fn codex_consent_can_be_revoked_and_model_actions_require_a_connection(cx: &mut 
 }
 
 #[gpui_kit::test]
-fn detail_suggestions_save_the_edited_choice_and_discard_the_other(cx: &mut TestAppContext) {
+fn detail_suggestions_trigger_on_leave_and_stay_with_the_edited_scene(cx: &mut TestAppContext) {
     let workspace = test_support::open(cx);
     cx.simulate_window_resize(workspace.window, size(px(1440.), px(1600.)));
     let project = Project::open(&workspace.root).unwrap();
@@ -333,7 +333,6 @@ fn detail_suggestions_save_the_edited_choice_and_discard_the_other(cx: &mut Test
         .find(|scene| scene.title() == "Das Signal")
         .unwrap();
     let id = scene.id();
-    let snapshot = SceneText::from_markdown(id, scene.body());
     let mut world = Knowledge::from_project(&project);
     let target = world.create(
         KnowledgeKind::Place,
@@ -345,29 +344,73 @@ fn detail_suggestions_save_the_edited_choice_and_discard_the_other(cx: &mut Test
     world.stage_changes(&project, &mut store).unwrap();
     store.flush().unwrap();
 
-    let [accept, discard] = workspace.update(cx, |view, window, cx| {
+    let home = tempfile::tempdir().unwrap();
+    enable_fixture(cx, &workspace, home.path());
+    let request = home.path().join("codex/detail-request");
+    let other_scene = project
+        .scenes()
+        .find(|scene| scene.title() == "Der Start")
+        .unwrap()
+        .id();
+    workspace.update(cx, |view, window, cx| {
         view.refresh_project().unwrap();
         view.select_scene(id, window, cx);
-        view.ai.details.set_enabled(true);
-        view.complete_ai(
-            Pending::Detail {
-                scene: id,
-                snapshot,
-            },
-            serde_json::json!([
-                {"quote": "Eine Tür öffnet sich.", "target": target, "text": "Eine Tür geht auf."},
-                {"quote": "Danach verstummt die Antenne.", "target": target, "text": "Die Antenne schweigt."}
-            ])
-            .to_string(),
-            None,
-            window,
-            cx,
-        );
+        view.editor.update(cx, |editor, cx| {
+            let end = editor.value().len();
+            editor.set_selected_range(end..end, cx);
+            editor.focus(window, cx);
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        window.input("Das Licht erlischt.", cx)
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    cx.run_until_parked();
+    assert!(!request.exists());
+    workspace.update(cx, |view, _, _| assert!(view.ai.pending.is_none()));
+
+    let open_scene = |cx: &mut TestAppContext, scene| {
+        codex_window(cx, &workspace, |window, cx| {
+            window.click(("page", 1_usize), cx);
+            window.click(format!("scene-{scene}"), cx);
+            window.click("outline-edit-scene", cx);
+        });
+    };
+    open_scene(cx, other_scene);
+    wait_for(cx, |_| request.exists());
+    let payload = std::fs::read_to_string(&request).unwrap();
+    assert!(payload.contains("Das Licht erlischt."));
+    assert!(!payload.contains("Die Sonde startet."));
+    let response = serde_json::json!([
+        {"quote": "Eine Tür öffnet sich.", "target": target, "text": "Eine Tür geht auf."},
+        {"quote": "Danach verstummt die Antenne.", "target": target, "text": "Die Antenne schweigt."}
+    ]).to_string();
+    let response_path = home.path().join("codex/detail-response.json");
+    let pending_response = response_path.with_extension("tmp");
+    std::fs::write(&pending_response, response).unwrap();
+    std::fs::rename(pending_response, response_path).unwrap();
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| view.ai.pending.is_none())
+    });
+    let [accept, discard] = workspace.update(cx, |view, _, _| {
+        assert_eq!(view.selected_scene, Some(other_scene));
+        assert!(view.ai.details.suggestions(other_scene).is_empty());
         let [accept, discard] = view.ai.details.suggestions(id) else {
-            panic!("Beide belegten Vorschläge werden angezeigt.");
+            panic!("Beide belegten Vorschläge bleiben bei ihrer Ursprungsszene.");
         };
         [accept.id, discard.id]
     });
+    assert_eq!(
+        Project::open(&workspace.root)
+            .unwrap()
+            .document(target)
+            .unwrap()
+            .body()
+            .trim_end(),
+        "Die Station ist alt."
+    );
+    open_scene(cx, id);
     codex_window(cx, &workspace, |window, cx| {
         window.click(format!("drop-detail-{discard}"), cx);
         assert!(window.try_find(format!("open-detail-{discard}")).is_none());
@@ -504,18 +547,54 @@ fn consistency_source_opens_the_timeline_relationship(cx: &mut TestAppContext) {
 #[path = "../../tests/support/app_server.rs"]
 mod app_server;
 
-#[gpui_kit::test]
-fn brainstorm_reopens_and_promotes_a_marked_reply_without_duplicate_events(
-    cx: &mut TestAppContext,
-) {
+fn wait_for(cx: &mut TestAppContext, mut predicate: impl FnMut(&mut TestAppContext) -> bool) {
     use std::{
         thread,
         time::{Duration, Instant},
     };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !predicate(cx) {
+        assert!(
+            Instant::now() < deadline,
+            "Zeitüberschreitung beim lokalen Protokolltest"
+        );
+        cx.executor().advance_clock(Duration::from_millis(180));
+        cx.run_until_parked();
+        thread::sleep(Duration::from_millis(5));
+    }
+}
 
+fn enable_fixture(cx: &mut TestAppContext, workspace: &TestWorkspace, home: &std::path::Path) {
+    let preferences = AiPreferences::at(home.into());
+    workspace.update(cx, |view, _, _| {
+        view.ai.session = AiSession::with_preferences(&preferences);
+        view.ai.preferences = Some(preferences);
+        view.ai.cli = Some(app_server::mock_executable().into());
+    });
+
+    codex_window(cx, workspace, |window, cx| {
+        window.click(("page", 7_usize), cx);
+        window.click("enable-codex", cx);
+    });
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai.session.status() == &AiStatus::SignInRequired
+        })
+    });
+    codex_window(cx, workspace, |window, cx| window.click("login", cx));
+    wait_for(cx, |cx| {
+        workspace.update(cx, |view, _, _| {
+            view.ai.session.status() == &AiStatus::Ready
+        })
+    });
+}
+
+#[gpui_kit::test]
+fn brainstorm_reopens_and_promotes_a_marked_reply_without_duplicate_events(
+    cx: &mut TestAppContext,
+) {
     let workspace = test_support::open(cx);
     let home = tempfile::tempdir().unwrap();
-    let preferences = AiPreferences::at(home.path().into());
     let project = Project::open(&workspace.root).unwrap();
     let timeline = Timeline::from_project(&project);
     let event = |title: &str| {
@@ -529,40 +608,7 @@ fn brainstorm_reopens_and_promotes_a_marked_reply_without_duplicate_events(
     let pair = [event("Erstkontakt"), event("Aufbruch")];
     let other = event("Fristablauf");
 
-    workspace.update(cx, |view, _, _| {
-        view.ai.session = AiSession::with_preferences(&preferences);
-        view.ai.preferences = Some(preferences);
-        view.ai.cli = Some(app_server::mock_executable().into());
-    });
-
-    fn wait_for(cx: &mut TestAppContext, mut predicate: impl FnMut(&mut TestAppContext) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !predicate(cx) {
-            assert!(
-                Instant::now() < deadline,
-                "Zeitüberschreitung beim lokalen Protokolltest"
-            );
-            cx.executor().advance_clock(Duration::from_millis(180));
-            cx.run_until_parked();
-            thread::sleep(Duration::from_millis(5));
-        }
-    }
-
-    codex_window(cx, &workspace, |window, cx| {
-        window.click(("page", 7_usize), cx);
-        window.click("enable-codex", cx);
-    });
-    wait_for(cx, |cx| {
-        workspace.update(cx, |view, _, _| {
-            view.ai.session.status() == &AiStatus::SignInRequired
-        })
-    });
-    codex_window(cx, &workspace, |window, cx| window.click("login", cx));
-    wait_for(cx, |cx| {
-        workspace.update(cx, |view, _, _| {
-            view.ai.session.status() == &AiStatus::Ready
-        })
-    });
+    enable_fixture(cx, &workspace, home.path());
 
     let prompt = "Was sieht die Figur? Der Leuchtturm ist dunkel.";
     codex_window(cx, &workspace, |window, cx| {

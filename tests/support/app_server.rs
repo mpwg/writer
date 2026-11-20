@@ -122,6 +122,19 @@ fn main() {
                 if line.contains("Prozess beenden") { return; }
                 let turn_id = if turn_count == 1 { "turn-valid" } else { "turn-second" };
                 response(id, &format!(r#"{{"turn":{{"id":"{turn_id}","status":"inProgress","items":[],"error":null}}}}"#));
+                if line.contains("Finde belegte Ergänzungen für bestehende Zielnotizen") {
+                    assert_eq!(turn_count, 1, "repeated detail request for an unchanged scene");
+                    fs::write(codex_home.join("detail-request"), &line).unwrap();
+                    let response_file = codex_home.join("detail-response.json");
+                    let start = std::time::Instant::now();
+                    while !response_file.exists() {
+                        assert!(start.elapsed() < Duration::from_secs(10), "missing detail fixture response");
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    let reply = fs::read_to_string(response_file).unwrap();
+                    event("turn/completed", &format!(r#"{{"threadId":"thread-valid","turn":{{"id":"{turn_id}","status":"completed","items":[{{"type":"agentMessage","id":"detail","text":{reply:?},"phase":"final_answer"}}],"error":null}}}}"#));
+                    continue;
+                }
                 if line.contains("Späte Antwort") {
                     event("item/agentMessage/delta", r#"{"threadId":"thread-valid","turnId":"turn-valid","itemId":"item","delta":"Beginn"}"#);
                     continue;
