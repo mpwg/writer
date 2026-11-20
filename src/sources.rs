@@ -131,6 +131,35 @@ impl Sources {
             Err(_) => Resolution::Missing,
         }
     }
+
+    /// Returns all current occurrences of the quote in its source document.
+    ///
+    /// Each occurrence contains a fresh anchor and its one-based line and
+    /// grapheme column in the indexed text, with concept markers omitted.
+    /// Unavailable documents and empty quotes have no occurrences.
+    pub fn occurrences(&self, anchor: &Anchor) -> Vec<(Anchor, usize, usize)> {
+        let Some(text) = self.documents.get(&anchor.document_id()) else {
+            return Vec::new();
+        };
+        if anchor.quote().is_empty() {
+            return Vec::new();
+        }
+        let mut offset = 0;
+        let mut line = 1;
+        let mut column = 1;
+        text.matching_ranges(anchor.quote())
+            .filter_map(|range| {
+                let between = &text.text()[offset..range.start];
+                line += between.bytes().filter(|byte| *byte == b'\n').count();
+                column = between.rsplit_once('\n').map_or_else(
+                    || column + between.graphemes(true).count(),
+                    |(_, end)| 1 + end.graphemes(true).count(),
+                );
+                offset = range.start;
+                Some((text.anchor(range).ok()?, line, column))
+            })
+            .collect()
+    }
 }
 
 struct Block {

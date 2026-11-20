@@ -25,6 +25,31 @@ pub(crate) fn initialize(root: &Path) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn latest_version_time(root: &Path) -> Option<String> {
+    let result = run(root, ["log", "-1", "--format=%cI", "HEAD"]).ok()?;
+    let value = String::from_utf8(result.stdout).ok()?.trim().to_owned();
+    (!value.is_empty()).then_some(value)
+}
+
+pub(crate) fn has_unversioned_changes(root: &Path) -> Result<bool> {
+    let output = run(
+        root,
+        [
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "--no-renames",
+            "--untracked-files=all",
+            "-z",
+        ],
+    )?;
+    Ok(output
+        .stdout
+        .split(|&byte| byte == 0)
+        .filter_map(|record| record.get(3..))
+        .any(|path| is_book_path(&path_from_git(path))))
+}
+
 pub(crate) fn checkpoint(root: &Path, message: &str) -> Result<Checkpoint> {
     let staged = changed_paths(run(
         root,
@@ -96,16 +121,18 @@ fn changed_paths(output: Output) -> Vec<PathBuf> {
         .stdout
         .split(|&byte| byte == 0)
         .filter(|bytes| !bytes.is_empty())
-        .map(|bytes| {
-            #[cfg(unix)]
-            {
-                use std::os::unix::ffi::OsStrExt;
-                PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
-            }
-            #[cfg(not(unix))]
-            PathBuf::from(String::from_utf8_lossy(bytes).as_ref())
-        })
+        .map(path_from_git)
         .collect()
+}
+
+fn path_from_git(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    PathBuf::from(String::from_utf8_lossy(bytes).as_ref())
 }
 
 fn run(root: &Path, args: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>) -> Result<Output> {

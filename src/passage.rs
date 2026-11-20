@@ -173,16 +173,7 @@ impl SceneText {
             return Ok(target.range.clone());
         }
         let text = self.text();
-        let mut candidates = text
-            .grapheme_indices(true)
-            .map(|(start, _)| start)
-            .chain(std::iter::once(text.len()))
-            .filter_map(|start| {
-                let rest = &text[start..];
-                rest.strip_prefix(&target.quote)?;
-                let end = start + target.quote.len();
-                grapheme_boundary(text, end).then_some(start..end)
-            });
+        let mut candidates = self.matching_ranges(&target.quote);
         let first = candidates.next().ok_or(TextError::MissingAnchor)?;
         let Some(second) = candidates.next() else {
             return if target.quote.is_empty() && !matches_context(text, target, &first) {
@@ -199,6 +190,21 @@ impl SceneText {
             (Some(selected), None) => Ok(selected),
             _ => Err(TextError::AmbiguousAnchor),
         }
+    }
+
+    pub(crate) fn matching_ranges<'a>(
+        &'a self,
+        quote: &'a str,
+    ) -> impl Iterator<Item = Range<usize>> + 'a {
+        let text = self.text();
+        text.grapheme_indices(true)
+            .map(|(start, _)| start)
+            .chain(std::iter::once(text.len()))
+            .filter_map(move |start| {
+                text[start..].strip_prefix(quote)?;
+                let end = start + quote.len();
+                grapheme_boundary(text, end).then_some(start..end)
+            })
     }
 
     pub fn replace(&mut self, target: &Anchor, markdown: &str) -> Result<(), TextError> {

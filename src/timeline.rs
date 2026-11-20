@@ -47,6 +47,10 @@ pub struct EventRelation {
 pub enum TimelineError {
     #[error("Ereignis {0} fehlt")]
     MissingEvent(Id),
+    #[error("Die gewählte Verbindung fehlt")]
+    MissingRelation,
+    #[error("Zwischen diesen Ereignissen besteht bereits eine Verbindung dieses Typs")]
+    DuplicateRelation,
     #[error("Die Verbindung würde einen Zeitkreis schließen: {}", display_path(.path))]
     Cycle { path: Vec<Id> },
 }
@@ -229,6 +233,37 @@ impl Timeline {
             time,
             other: BTreeMap::new(),
         });
+        Ok(())
+    }
+
+    /// Changes the kind of an existing edge while preserving its metadata and endpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the selected edge is missing or the destination kind exists.
+    pub fn change_relation_kind(
+        &mut self,
+        from: Id,
+        to: Id,
+        previous: Relation,
+        kind: Relation,
+    ) -> Result<(), TimelineError> {
+        let matches = |relation: &EventRelation| relation.from == from && relation.to == to;
+        let index = self
+            .relations
+            .iter()
+            .position(|relation| matches(relation) && relation.kind == previous)
+            .ok_or(TimelineError::MissingRelation)?;
+        if previous != kind
+            && self
+                .relations
+                .iter()
+                .any(|relation| matches(relation) && relation.kind == kind)
+        {
+            return Err(TimelineError::DuplicateRelation);
+        }
+        // Both kinds imply temporal precedence in the same direction.
+        self.relations[index].kind = kind;
         Ok(())
     }
 

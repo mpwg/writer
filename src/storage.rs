@@ -181,6 +181,15 @@ impl Store {
     pub fn is_pending(&self) -> bool {
         !self.pending.is_empty()
     }
+
+    pub fn latest_version_time(&self) -> Option<String> {
+        version::latest_version_time(&self.root)
+    }
+
+    pub fn has_unversioned_changes(&self) -> Result<bool> {
+        version::has_unversioned_changes(&self.root)
+    }
+
     pub fn discard_pending(&mut self) {
         self.pending.clear();
         self.conflict = None;
