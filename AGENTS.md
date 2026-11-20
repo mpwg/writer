@@ -14,6 +14,7 @@
 - Gib bei Cargo-Abhängigkeiten die tatsächlich benötigte Mindestversion an und lass das optionale `^` weg, zum Beispiel `"1.2.3"`.
 
 - Nutze `test-driven-development` für Features, Fehlerbehebungen, Refactorings und Verhaltensänderungen. Schreibe zuerst einen Test und prüfe, dass er aus dem erwarteten Grund fehlschlägt. Implementiere die kleinste passende Änderung, prüfe den erfolgreichen Testlauf und räume bei Bedarf auf. Führe vor dem Abschluss die vollständige Testsuite aus und benenne etwaige Fehlschläge.
+- Automatisierte Tests müssen ohne Computer Use laufen. Bevorzuge Unit-Tests, wo sie das relevante Verhalten abdecken. Entkopple Anwendungslogik und Zustandsübergänge von der Oberfläche und mache externe Abhängigkeiten bei Bedarf ersetzbar, damit sich das Verhalten direkt testen lässt. Nutze automatisierte Integrationstests für Verhalten, das erst im Zusammenspiel mehrerer Komponenten entsteht.
 - Verwende die jeweils neuesten stabilen Versionen der Entwicklungswerkzeuge, der Rust-Toolchain und der Abhängigkeiten. Prüfe die verfügbaren Versionen beim Einrichten und bei Aktualisierungen anhand der offiziellen Veröffentlichungen oder Paketregister. Prüfe nach Aktualisierungen den Build und die Tests.
 
 ## Git
