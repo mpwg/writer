@@ -1,5 +1,7 @@
 # UX-Entwurf für die Schreibwerkstatt
 
+Der [klickbare Prototyp](../../prototyp/index.html) zeigt alle neun Ansichten mit „Der Herr der Ringe“ als Beispielbuch. Öffne `docs/prototyp/index.html` aus dem ausgecheckten Repository direkt im Browser. **Ansicht** wechselt zwischen den Screens. Speichern, KI und Export zeigen Beispielzustände.
+
 Der Entwurf begleitet eine Autorin oder einen Autor vom ersten Ereignis bis zum exportierten Manuskript. Die Wireframes verwenden das Beispielbuch „Das verlorene Imperium“. Vorgeschlagen sind ein gemeinsames Desktopfenster, ein einblendbarer Kontextbereich und eine Schreibfläche in warmer Papierfarbe. [Freigegebene Produktspezifikation](2026-11-20-schreibprogramm-design.md) · [Umsetzungsplan](../plans/2026-11-20-schreibwerkstatt.md)
 
 ## Fenster und Gestaltung
