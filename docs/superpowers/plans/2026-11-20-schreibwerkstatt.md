@@ -220,9 +220,10 @@ Die Plattform-Builds beginnen mit Paket 1. Paket 8 kann nach dem Projektformat u
 **Schnittstelle** Öffentliche App-Einstiegspunkte und Buchordner aus den vorherigen Paketen.
 
 - [x] Verhalten in `tests/desktop_journey.rs` zunächst als Integrationstest festhalten. Kernassertionen: `assert_eq!(reopened_order(), exported_order()); assert_eq!(git_versions_added(), 1); assert!(works_without_codex());`
-- [ ] `cargo test --test desktop_journey` ausführen. Der Test muss die fehlende Funktion erkennen.
+- [x] `cargo test --test desktop_journey` ausführen. Der Test muss die fehlende Funktion erkennen. Mit in einer separaten Repository-Kopie umgekehrter Markdown-Kapitelreihenfolge schlug die Reihenfolgeprüfung fehl. Der Test bestand mit dem unveränderten Export.
 - [ ] Einen kompletten Durchlauf mit Testbuch durchführen. Zusätzlich auf macOS, Windows und Linux Fenster, Eingabemethoden, Tastaturkürzel, lange Szene, Tastaturnavigation, Dateidialoge, externe Änderungen, Git und PDF visuell prüfen. Binaries je System im Release-Modus bauen und starten. Offline-Durchlauf mit deaktivierter KI, reproduzierbarer KI-Durchlauf mit Protokoll-Fixture, abschließend tatsächlichen Login, Brainstorming, Abbruch und Quellensprung mit aktiviertem Testprojekt prüfen. Pro Plattform Ergebnis und konkret ungeprüfte Punkte vermerken.
-- [ ] `cargo test --test desktop_journey` ausführen und die beschriebenen Anwendungsfälle prüfen. Erwartet werden erfolgreiche Assertions und der oben beschriebene praktische Nachweis.
+- [x] `cargo test --test desktop_journey` lokal ausführen. Die Assertions zu Zeitbezug, Erzählreihenfolge, Git-Version und Exporten waren erfolgreich.
+- [ ] Den plattformbezogenen praktischen Nachweis zu `desktop_journey` abschließen. Der native macOS-Neustart nach der Konfliktauflösung ist im Desktop-Abnahmeprotokoll belegt. Windows, Linux und der echte Anmeldeweg bleiben offen.
 - [ ] **Praktische Abnahme.** Den [Durchgang im UX-Entwurf](../specs/2026-11-20-schreibwerkstatt-ux-design.md#durchgang-für-die-abnahme) auf macOS, Windows und Linux mit demselben synthetischen Buch ausführen. Eine Datei intern und extern ändern, beide Fassungen vergleichen und die gewählte Fassung nach Neustart prüfen. Je System Versionen, Release-Build, Fensterstart, Dateidialoge, Tastaturbedienung, Texteingabe und Exporte dokumentieren. Offline-Lauf, simulierte KI und echter Anmeldeweg erhalten getrennte Ergebnisse. Fehlende Nachweise als offen kennzeichnen.
 - [x] Geprüfte Änderungen als eigenständigen Git-Commit mit Co-Autoren-Trailer festhalten.
 

@@ -7,11 +7,12 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 | Umgebung | Ergebnis |
 | --- | --- |
 | macOS 27.2.1, Apple Silicon, Rust 1.100.0, Git 2.56.1 | Formatprüfung, Clippy, 82 automatisierte Tests und nativer Release-Build bestanden. Im nativen Fenster das Testbuch geöffnet, eine Zeitkante gewählt, die Rückblende geöffnet und Umlauttext ergänzt. Die Szenendatei enthält die Bearbeitung. „Speichern“ erzeugte genau einen lokalen Commit. Das über den nativen Dialog exportierte PDF enthält die Konzeptkennzeichnung, den ergänzten Text und die Erzählreihenfolge. |
-| Windows und Linux | Native Builds und Fensterdurchläufe für diesen Stand stehen aus. GitHub-Prüfungen sind zurückgestellt. |
+| Windows | Native Build- und Fensterabnahme offen. Im aktuellen Arbeitsumfeld steht kein Windows-Testsystem bereit. |
+| Linux | Native Build- und Fensterabnahme offen. Im aktuellen Arbeitsumfeld steht kein Linux-Testsystem bereit. |
 
-Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
+Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. In einer separaten Kopie des Repositorys kehrte ein absichtlich geänderter Markdown-Export die Kapitelreihenfolge um. Der Test scheiterte am Vergleich der beiden Szenenpositionen und bestand anschließend im unveränderten Repository. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `baf47a8` bestanden Formatprüfung, Clippy, alle 123 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `ad8013d` bestanden Formatprüfung, Clippy, alle 123 lokalen Tests und der native macOS-Release-Build. Cargo lief mit `--offline --locked`. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -51,7 +52,7 @@ Der [Desktop-UX-Entwurf](superpowers/specs/2026-11-20-schreibwerkstatt-ux-design
 
 Der native macOS-Release-Build von `a804324` öffnete die synthetische Kopie des Buchs über ⌘O und den Systemordnerdialog. Der Fenstertitel wechselte zwischen Timeline, Kapitel und Schreiben. Die Timeline zeigte die Quellliste, das Netz und das zeitlich offene Ereignis. Im schmalen Dokumentfenster zeigte die Vorschau „Eine Tür öffnet sich“ als beschriftetes Konzept neben gewöhnlicher Prosa. „Ablage → Speichern“ erzeugte genau den ersten Git-Commit des Testbuchs. Der dokumentweite Ablauf in den übrigen Ansichten, die nativen Windows- und Linux-Durchläufe und Codex mit persönlicher Anmeldung bleiben offen.
 
-Die Sichtprüfung zeigte noch die neutrale Standardpalette. Die danach eingebundene helle und dunkle Schreibwerkstatt-Palette wird über den GPUI-Theme-Wechsel auf Schieferblau, Quelllistenfarbe und Textfarbe geprüft. Die visuelle Prüfung der neuen Palette, einschließlich der Abgrenzung von Konzepten in der formatierten Vorschau, steht aus.
+Im nativen macOS-Release-Build von `ad8013d` wurde das Testbuch in einem eigenen Profil über den Systemordnerdialog geöffnet. Nach einer externen Dateiänderung und einer davon abweichenden Eingabe im Editor zeigte der Konfliktbereich beide Fassungen. „Auf Festplatte übernehmen“ übernahm den externen Absatz. `⌘S` erzeugte genau einen Commit, dessen Szenendatei bytegenau dem Arbeitsstand entsprach. Nach `⌘Q` und einem neuen App-Prozess öffnete der Eintrag in „Zuletzt geöffnet“ wieder „Das Signal“ mit der gewählten Fassung. In der hellen Palette stand die Konzeptpassage als beschrifteter Block neben der normalen Prosa. Die dunkle Palette ist über den GPUI-Theme-Wechsel geprüft, ihre native Sichtprüfung steht aus.
 
 ## Codex
 
@@ -62,6 +63,7 @@ Die Sichtprüfung zeigte noch die neutrale Standardpalette. Die danach eingebund
 - Die GPUI-Tests für Szenenentwürfe prüfen die Teilübernahme aus einem Entwurf für zwei Konzeptstichpunkte. Benachbarte Prosa und der Konzeptstatus bleiben erhalten. Ohne Bestätigung wird keine Weltkarte angelegt. Bei einer verspäteten Antwort auf eine inzwischen doppelte Zielpassage übernimmt die App den Ausschnitt erst nach einer neuen Textauswahl.
 - Ein durchgehender GPUI-Test verbindet die Codex-Ansicht mit derselben lokalen Protokoll-Fixture. Er durchläuft Opt-in, simulierte Anmeldung und eine Frage zum Ereignispaar. Danach markiert er einen Teil der Antwort als Idee, schaltet Codex aus und öffnet das Buch mit umgekehrter Ereignisauswahl. Gespräch und Markierung bleiben erhalten. Der Abbruch lässt Ereignisse und Beziehungen unverändert. Nach zweimaliger Bestätigung liegen genau ein neues Ereignis und die gewählte Beziehung vor.
 - Die installierte Codex-CLI erreichte mit synthetischem Buch im nativen Fenster den Browser-Anmeldeschritt. Anmeldung abgebrochen, KI ausgeschaltet und den Aus-Zustand geprüft.
+- Der native macOS-Neustarttest lief mit abgeschalteter KI. Ein System ohne installierte Codex-CLI steht für den praktischen Durchlauf noch aus.
 - Die persönliche ChatGPT-Anmeldung, echte Modellantworten und der anschließende vollständige Codex-Durchlauf stehen aus. Die Übernahme von Ideen, Entwürfen, Detailvorschlägen und Entscheidungen hat lokale Fachtests.
 
 ## Prüfkommandos
