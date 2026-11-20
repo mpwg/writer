@@ -158,7 +158,7 @@ Die Plattform-Builds beginnen mit Paket 1. Paket 8 kann nach dem Projektformat u
 - [x] `cargo test --test pair_chat` ausführen. Der Test muss die fehlende Funktion erkennen.
 - [x] Ungeordnetes Ereignispaar als Chat-Schlüssel; einzelne Ideen mit ID im Antworttext markieren. Nachrichten und Markierungen als Markdown speichern. Nach Neustart mit Verlauf weiterarbeiten, bei verlorener Server-Thread-ID lokalen Verlauf als Kontext übernehmen. Auswahl als neues Ereignis samt explizit gewählten Beziehungen einfügen; doppelte Übernahme beim Wiederholen verhindern. Quelle zur ursprünglichen Nachricht bewahren.
 - [x] `cargo test --test pair_chat` ausführen und die beschriebenen Anwendungsfälle prüfen. Erwartet werden erfolgreiche Assertions.
-- [ ] **Praktische Abnahme.** Das Paar A/B besprechen, eine Idee markieren, das Buch schließen und B/A öffnen. Verlauf und Markierung prüfen. Eine Übernahme zunächst abbrechen und den Ereignisbestand vergleichen. Danach zweimal dieselbe Übernahme bestätigen und genau ein neues Ereignis mit den gewählten Beziehungen nachweisen.
+- [x] **Praktische Abnahme.** Das Paar A/B besprechen, eine Idee markieren, das Buch schließen und B/A öffnen. Verlauf und Markierung prüfen. Eine Übernahme zunächst abbrechen und den Ereignisbestand vergleichen. Danach zweimal dieselbe Übernahme bestätigen und genau ein neues Ereignis mit den gewählten Beziehungen nachweisen. Der GPUI-Komponententest `brainstorm_reopens_and_promotes_a_marked_reply_without_duplicate_events` durchläuft dies mit der lokalen Codex-Protokoll-Fixture.
 - [x] Geprüfte Änderungen als eigenständigen Git-Commit mit Co-Autoren-Trailer festhalten.
 
 ### 10. Fragen zur Geschichte mit Quellen beantworten

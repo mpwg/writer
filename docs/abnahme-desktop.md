@@ -11,7 +11,7 @@ Stand 20. November 2026. Die Arbeitspakete für den lokalen Schreibablauf und di
 
 Die automatisierten Prüfungen laufen über Cargo. `desktop_journey` verbindet Timeline, Rückblende, Dateisicherung, Git und beide Exportformate. `autosave_git` erzeugt einen Dateikonflikt mit zwei Store-Instanzen und löst ihn durch die bestätigte Zusammenführung auf. Eine abweichende Dokumentkennung wird abgewiesen und beide Fassungen bleiben erhalten. `manuscript_export` prüft den Text im erzeugten PDF sowie den Dateierhalt bei einem Exportfehler.
 
-Für `7bc9edd` bestanden Formatprüfung, Clippy, alle 118 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
+Für `abca47b` bestanden Formatprüfung, Clippy, alle 118 lokalen Tests und der native macOS-Release-Build. Der macOS-Linker meldete im Testprofil weiterhin eine Unwind-Warnung.
 
 Im Release-Build von `373da59` wurde „Das Signal“ per Ziehen nach „Aufbruch“ verschoben. Die Szenendatei behielt den Zeitbezug „Erstkontakt“. Anschließend wurde auch das Kapitel „Rückblende“ per Ziehen umgeordnet. Beide Änderungen waren in den Kapiteldateien nachvollziehbar.
 
@@ -50,7 +50,7 @@ Die Sichtprüfung zeigte noch die neutrale Standardpalette. Die danach eingebund
 ## Codex
 
 - Die Protokoll-Fixture prüft lokalen Opt-in, Anmeldung, fragmentierte Antworten, Abbruch, Prozessende und ausbleibende Übernahmen bei verspäteten Ergebnissen.
-- Ein durchgehender Test verbindet die GPUI-Codex-Ansicht mit derselben lokalen Protokoll-Fixture. Er durchläuft Opt-in und simulierte Anmeldung, sendet eine Frage zum Ereignispaar und prüft Frage und Antwort nach dem Wiederöffnen des Markdown-Gesprächs. Erst eine weitere ausdrückliche Übernahme kann ein Ereignis anlegen. Der Test schaltet Codex anschließend wieder aus.
+- Ein durchgehender GPUI-Test verbindet die Codex-Ansicht mit derselben lokalen Protokoll-Fixture. Er durchläuft Opt-in, simulierte Anmeldung und eine Frage zum Ereignispaar. Danach markiert er einen Teil der Antwort als Idee, schaltet Codex aus und öffnet das Buch mit umgekehrter Ereignisauswahl. Gespräch und Markierung bleiben erhalten. Der Abbruch lässt Ereignisse und Beziehungen unverändert. Nach zweimaliger Bestätigung liegen genau ein neues Ereignis und die gewählte Beziehung vor.
 - Die installierte Codex-CLI erreichte mit synthetischem Buch im nativen Fenster den Browser-Anmeldeschritt. Anmeldung abgebrochen, KI ausgeschaltet und den Aus-Zustand geprüft.
 - Die persönliche ChatGPT-Anmeldung, echte Modellantworten und der anschließende vollständige Codex-Durchlauf stehen aus. Die Übernahme von Ideen, Entwürfen, Detailvorschlägen und Entscheidungen hat lokale Fachtests.
 
