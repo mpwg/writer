@@ -505,7 +505,9 @@ fn consistency_source_opens_the_timeline_relationship(cx: &mut TestAppContext) {
 mod app_server;
 
 #[gpui_kit::test]
-fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppContext) {
+fn brainstorm_reopens_and_promotes_a_marked_reply_without_duplicate_events(
+    cx: &mut TestAppContext,
+) {
     use std::{
         thread,
         time::{Duration, Instant},
@@ -607,6 +609,20 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
         [(Role::Author, prompt), (Role::Codex, "Die Küste.")]
     );
     assert_eq!(Timeline::from_project(&reopened).ordered_events().len(), 3);
+    let message = chat.messages()[1].id;
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(format!("message-{message}"), cx);
+    });
+    workspace.update(cx, |view, _, cx| {
+        view.ai.answer.update(cx, |answer, cx| {
+            answer.set_selected_range(0.."Die Küste.".len(), cx);
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| window.click("mark-idea", cx));
+    let reopened = Project::open(&workspace.root).unwrap();
+    let chat = Brainstorm::open(&reopened, pair).unwrap();
+    let idea = chat.ideas().first().unwrap().id;
 
     codex_window(cx, &workspace, |window, cx| {
         window.click(("page", 7_usize), cx);
@@ -617,4 +633,75 @@ fn brainstorm_reaches_the_local_app_server_and_saves_its_reply(cx: &mut TestAppC
     workspace.update(cx, |view, _, _| {
         assert_eq!(view.ai.session.status(), &AiStatus::Disabled)
     });
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click("choose-project", cx);
+        window.click("open", cx);
+    });
+    let root = workspace.root.clone();
+    cx.simulate_path_prompt_response(move |_| Some(vec![root]));
+    cx.run_until_parked();
+
+    let open_reversed_pair = |cx: &mut TestAppContext| {
+        codex_window(cx, &workspace, |window, cx| {
+            window.click(format!("event-{}", pair[1]), cx);
+            window.click("brainstorm-from-event", cx);
+            window.click(format!("brainstorm-second-{}", pair[0]), cx);
+            assert!(window.find(format!("message-{message}")).visible());
+            window.click(format!("idea-{idea}"), cx);
+            window.click(format!("promote-{}-2", pair[0]), cx);
+        });
+    };
+    open_reversed_pair(cx);
+    workspace.update(cx, |view, window, cx| {
+        view.ai.note.update(cx, |input, cx| {
+            input.set_value("Nicht übernehmen", window, cx);
+        });
+    });
+    codex_window(cx, &workspace, |window, cx| {
+        assert!(window.try_find("cancel-idea-promotion").is_some());
+        window.click("cancel-idea-promotion", cx);
+        assert!(window.try_find("promote").is_none());
+        assert!(window.find(format!("idea-{idea}")).visible());
+    });
+    let after_cancel = Project::open(&workspace.root).unwrap();
+    let unchanged = Timeline::from_project(&after_cancel);
+    assert_eq!(unchanged.ordered_events(), timeline.ordered_events());
+    assert_eq!(unchanged.relations(), timeline.relations());
+    assert_eq!(
+        Brainstorm::open(&after_cancel, [pair[1], pair[0]])
+            .unwrap()
+            .ideas()[0]
+            .quote,
+        "Die Küste."
+    );
+
+    codex_window(cx, &workspace, |window, cx| {
+        window.click(format!("idea-{idea}"), cx);
+        window.click(format!("promote-{}-2", pair[0]), cx);
+        window.click("promote", cx);
+    });
+    open_reversed_pair(cx);
+    codex_window(cx, &workspace, |window, cx| window.click("promote", cx));
+    let after_promote = Project::open(&workspace.root).unwrap();
+    let timeline = Timeline::from_project(&after_promote);
+    assert_eq!(timeline.ordered_events().len(), 4);
+    assert_eq!(timeline.event(idea).unwrap().title, "Die Küste.");
+    assert!(
+        timeline
+            .event(idea)
+            .unwrap()
+            .body
+            .contains(&format!("#nachricht-{message}"))
+    );
+    assert_eq!(
+        timeline
+            .relations()
+            .iter()
+            .filter(|link| {
+                link.from == pair[0] && link.to == idea && link.kind == Relation::Cause
+            })
+            .count(),
+        1
+    );
 }

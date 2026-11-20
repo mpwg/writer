@@ -700,20 +700,34 @@ impl ProjectView {
         cx.notify();
     }
 
-    fn mark_idea(&mut self, cx: &mut Context<Self>) {
+    fn mark_idea(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((chat, message)) = self.ai.brainstorm.as_mut().zip(self.ai.brainstorm_message)
         else {
             return;
         };
         let range = self.ai.answer.read(cx).selected_range();
         match chat.mark(message, range) {
-            Ok(id) => self.ai.idea = Some(id),
+            Ok(id) => self.edit_idea_promotion(Some(id), window, cx),
             Err(error) => {
                 self.ai
                     .messages
                     .insert(Activity::Brainstorm, error.to_string());
             }
         }
+        cx.notify();
+    }
+
+    fn edit_idea_promotion(
+        &mut self,
+        idea: Option<Id>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai.idea = idea;
+        self.ai.links.clear();
+        self.ai
+            .note
+            .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
 
@@ -1839,7 +1853,9 @@ impl ProjectView {
                         .child(
                             Button::new("mark-idea")
                                 .label("Auswahl als Idee markieren")
-                                .on_click(cx.listener(|view, _, _, cx| view.mark_idea(cx))),
+                                .on_click(
+                                    cx.listener(|view, _, window, cx| view.mark_idea(window, cx)),
+                                ),
                         )
                 })
                 .children(chat.ideas().iter().map(|idea| {
@@ -1848,12 +1864,7 @@ impl ProjectView {
                         .label(format!("Noch offen · {}", truncate(&idea.quote, 200)))
                         .when(self.ai.idea == Some(id), |button| button.primary())
                         .on_click(cx.listener(move |view, _, window, cx| {
-                            view.ai.idea = Some(id);
-                            view.ai.links.clear();
-                            view.ai
-                                .note
-                                .update(cx, |input, cx| input.set_value("", window, cx));
-                            cx.notify();
+                            view.edit_idea_promotion(Some(id), window, cx);
                         }))
                 }))
                 .when_some(
@@ -2088,10 +2099,26 @@ impl ProjectView {
                     )
             }))
             .child(
-                Button::new("promote")
-                    .primary()
-                    .label("Idee als Ereignis übernehmen")
-                    .on_click(cx.listener(|view, _, window, cx| view.promote_idea(window, cx))),
+                div()
+                    .flex()
+                    .gap_2()
+                    .flex_wrap()
+                    .child(
+                        Button::new("promote")
+                            .primary()
+                            .label("Idee als Ereignis übernehmen")
+                            .on_click(
+                                cx.listener(|view, _, window, cx| view.promote_idea(window, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("cancel-idea-promotion")
+                            .label("Abbrechen")
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                view.edit_idea_promotion(None, window, cx);
+                                window.focus(&view.keyboard_focus, cx);
+                            })),
+                    ),
             )
     }
 
