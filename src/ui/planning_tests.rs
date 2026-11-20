@@ -72,9 +72,9 @@ fn timeline_persists_new_event_from_keyboard_input(cx: &mut TestAppContext) {
     let workspace = open(cx);
     let (title, body, time) = workspace.update(cx, |view, _, _| {
         (
-            view.form_title.entity_id(),
+            view.event_title.entity_id(),
             view.form_body.entity_id(),
-            view.form_time.entity_id(),
+            view.event_time.entity_id(),
         )
     });
     interact(&workspace, cx, |window, cx| {
@@ -96,6 +96,52 @@ fn timeline_persists_new_event_from_keyboard_input(cx: &mut TestAppContext) {
         .expect("das Ereignis muss auf der Festplatte gespeichert sein");
     assert_eq!(event.body, "Die Fähre legt ab.");
     assert_eq!(event.time.as_deref(), Some("Bei Dämmerung"));
+}
+
+#[gpui_kit::test]
+fn timeline_preserves_the_event_title_draft_when_selecting_a_chapter(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let title = workspace.update(cx, |view, _, _| view.event_title.entity_id());
+    interact(&workspace, cx, |window, cx| {
+        window.click(format!("event-{FIRST_EVENT}"), cx);
+        enter_text(window, title, "Funkkontakt", cx);
+        window.click(("page", 1_usize), cx);
+        window.click(format!("chapter-{FIRST_CHAPTER}"), cx);
+        window.click(("page", 0_usize), cx);
+        window.click("save-event", cx);
+    });
+
+    let timeline = Timeline::from_project(&reopen(&workspace));
+    assert_eq!(timeline.event(FIRST_EVENT).unwrap().title, "Funkkontakt");
+}
+
+#[gpui_kit::test]
+fn timeline_preserves_the_event_time_draft_when_saving_a_scene_time(cx: &mut TestAppContext) {
+    let workspace = open(cx);
+    let (event_time, scene_time) = workspace.update(cx, |view, _, _| {
+        (view.event_time.entity_id(), view.scene_time.entity_id())
+    });
+    interact(&workspace, cx, |window, cx| {
+        window.click(format!("event-{FIRST_EVENT}"), cx);
+        enter_text(window, event_time, "Bei Sonnenaufgang", cx);
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("scene-details", cx);
+        enter_text(window, scene_time, "Nach Mitternacht", cx);
+        window.click("set-scene-time", cx);
+        window.click(("page", 0_usize), cx);
+        window.click("save-event", cx);
+    });
+
+    let project = reopen(&workspace);
+    let outline = Outline::from_project(&project);
+    let scene = outline.scene(SIGNAL_SCENE).unwrap();
+    assert_eq!(scene.timing.time.as_deref(), Some("Nach Mitternacht"));
+    let timeline = Timeline::from_project(&project);
+    assert_eq!(
+        timeline.event(FIRST_EVENT).unwrap().time.as_deref(),
+        Some("Bei Sonnenaufgang")
+    );
 }
 
 #[gpui_kit::test]
@@ -199,7 +245,7 @@ fn timeline_opens_the_scene_derived_from_an_event(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn outline_creates_a_chapter_and_places_a_scene_with_the_buttons(cx: &mut TestAppContext) {
     let workspace = open(cx);
-    let title = workspace.update(cx, |view, _, _| view.form_title.entity_id());
+    let title = workspace.update(cx, |view, _, _| view.chapter_title.entity_id());
     interact(&workspace, cx, |window, cx| {
         window.click(("page", 1_usize), cx);
         enter_text(window, title, " Die Überfahrt ", cx);
@@ -281,7 +327,7 @@ fn outline_dragging_reorders_chapters_and_moves_scenes_without_changing_their_ev
 #[gpui_kit::test]
 fn scene_details_save_time_and_toggle_a_relative_bound(cx: &mut TestAppContext) {
     let workspace = open(cx);
-    let time = workspace.update(cx, |view, _, _| view.form_time.entity_id());
+    let time = workspace.update(cx, |view, _, _| view.scene_time.entity_id());
     let before = format!("scene-time-true-{SECOND_EVENT}");
     interact(&workspace, cx, |window, cx| {
         window.click(("page", 1_usize), cx);
@@ -296,6 +342,21 @@ fn scene_details_save_time_and_toggle_a_relative_bound(cx: &mut TestAppContext) 
     assert_eq!(scene.timing.time.as_deref(), Some("Nach Mitternacht"));
     assert_eq!(scene.timing.before, Some(SECOND_EVENT));
     assert_eq!(scene.event, Some(FIRST_EVENT));
+
+    interact(&workspace, cx, |window, cx| {
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{START_SCENE}"), cx);
+        window.click("scene-details", cx);
+        assert_eq!(window.find(("input", time)).value(), Some(""));
+
+        window.click(("page", 1_usize), cx);
+        window.click(format!("scene-{SIGNAL_SCENE}"), cx);
+        window.click("scene-details", cx);
+        assert_eq!(
+            window.find(("input", time)).value(),
+            Some("Nach Mitternacht")
+        );
+    });
 
     interact(&workspace, cx, |window, cx| window.click(before, cx));
     let outline = Outline::from_project(&reopen(&workspace));

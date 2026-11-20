@@ -158,13 +158,13 @@ impl ProjectView {
         };
         self.event = Some(id);
         self.event_target = None;
-        self.form_title.update(cx, |input, cx| {
+        self.event_title.update(cx, |input, cx| {
             input.set_value(event.title.clone(), window, cx)
         });
         self.form_body.update(cx, |input, cx| {
             input.set_value(event.body.clone(), window, cx)
         });
-        self.form_time.update(cx, |input, cx| {
+        self.event_time.update(cx, |input, cx| {
             input.set_value(event.time.clone().unwrap_or_default(), window, cx)
         });
         cx.notify();
@@ -175,14 +175,14 @@ impl ProjectView {
             return;
         }
         let Some(project) = &self.project else { return };
-        let title = self.form_title.read(cx).value();
+        let title = self.event_title.read(cx).value();
         if title.trim().is_empty() {
             self.error = Some("Gib dem Ereignis einen Titel.".into());
             cx.notify();
             return;
         }
         let body = self.form_body.read(cx).value();
-        let time = optional(self.form_time.read(cx).value().as_ref());
+        let time = optional(self.event_time.read(cx).value().as_ref());
         let mut timeline = Timeline::from_project(project);
         let id = if let Some(id) = self.event {
             if let Err(error) = timeline.update_event(id, title.trim(), &body, time) {
@@ -437,12 +437,12 @@ impl ProjectView {
                             .on_click(cx.listener(|view, _, window, cx| {
                                 view.event = None;
                                 view.event_target = None;
-                                view.form_title.update(cx, |input, cx| {
+                                view.event_title.update(cx, |input, cx| {
                                     input.set_value("", window, cx);
                                 });
                                 view.form_body
                                     .update(cx, |input, cx| input.set_value("", window, cx));
-                                view.form_time
+                                view.event_time
                                     .update(cx, |input, cx| input.set_value("", window, cx));
                                 cx.notify();
                             })),
@@ -456,11 +456,11 @@ impl ProjectView {
                     .map(|issue| div().child(issue.to_string())),
             )
             .child("Ereignistitel")
-            .child(Input::new(&self.form_title))
+            .child(Input::new(&self.event_title))
             .child("Stichpunkte")
             .child(Textarea::new(&self.form_body))
             .child("Zeitangabe")
-            .child(Input::new(&self.form_time))
+            .child(Input::new(&self.event_time))
             .child(
                 Button::new("save-event")
                     .primary()
@@ -688,7 +688,7 @@ impl ProjectView {
             .flex_col()
             .gap_3()
             .child("Kapitelname")
-            .child(Input::new(&self.form_title))
+            .child(Input::new(&self.chapter_title))
             .child(
                 div()
                     .flex()
@@ -698,7 +698,7 @@ impl ProjectView {
                             .primary()
                             .label("Kapitel anlegen")
                             .on_click(cx.listener(|view, _, _, cx| {
-                                let title = view.form_title.read(cx).value();
+                                let title = view.chapter_title.read(cx).value();
                                 if !title.trim().is_empty() {
                                     view.apply_outline(
                                         |outline| {
@@ -715,7 +715,7 @@ impl ProjectView {
                             Button::new("chapter-rename")
                                 .label("Kapitel umbenennen")
                                 .on_click(cx.listener(move |view, _, _, cx| {
-                                    let title = view.form_title.read(cx).value();
+                                    let title = view.chapter_title.read(cx).value();
                                     if !title.trim().is_empty() {
                                         view.apply_outline(
                                             |outline| outline.rename_chapter(id, title.trim()),
@@ -786,7 +786,7 @@ impl ProjectView {
                                             })
                                             .on_click(cx.listener(move |view, _, window, cx| {
                                                 view.chapter = Some(id);
-                                                view.form_title.update(cx, |input, cx| {
+                                                view.chapter_title.update(cx, |input, cx| {
                                                     input.set_value(title.clone(), window, cx)
                                                 });
                                                 cx.notify();
@@ -857,6 +857,17 @@ impl ProjectView {
             )
     }
 
+    pub(super) fn load_scene_time(&mut self, id: Id, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = &self.project else { return };
+        let outline = Outline::from_project(project);
+        let time = outline
+            .scene(id)
+            .and_then(|scene| scene.timing.time.as_deref())
+            .unwrap_or_default();
+        self.scene_time
+            .update(cx, |input, cx| input.set_value(time, window, cx));
+    }
+
     pub(super) fn scene_timing(&self, project: &Project, id: Id, cx: &mut Context<Self>) -> Div {
         let outline = Outline::from_project(project);
         let Some(scene) = outline.scene(id) else {
@@ -888,12 +899,12 @@ impl ProjectView {
                 scene.timing.time.as_deref().unwrap_or_default()
             ))
             .child("Zeitangabe präzisieren")
-            .child(Input::new(&self.form_time))
+            .child(Input::new(&self.scene_time))
             .child(
                 Button::new("set-scene-time")
                     .label("Zeitangabe sichern")
                     .on_click(cx.listener(move |view, _, _, cx| {
-                        let time = optional(view.form_time.read(cx).value().as_ref());
+                        let time = optional(view.scene_time.read(cx).value().as_ref());
                         view.update_scene_metadata(id, move |timing, _| timing.time = time, cx);
                     })),
             );

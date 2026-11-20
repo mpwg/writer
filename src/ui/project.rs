@@ -58,8 +58,10 @@ pub struct ProjectView {
     chapter: Option<Id>,
     event_target: Option<Id>,
     event_list: bool,
-    form_title: Entity<InputState>,
-    form_time: Entity<InputState>,
+    event_title: Entity<InputState>,
+    event_time: Entity<InputState>,
+    chapter_title: Entity<InputState>,
+    scene_time: Entity<InputState>,
     relation_note: Entity<InputState>,
     relation_time: Entity<InputState>,
     form_body: Entity<TextareaState>,
@@ -107,8 +109,10 @@ impl ProjectView {
             chapter: None,
             event_target: None,
             event_list: false,
-            form_title: cx.new(|cx| InputState::new(window, cx)),
-            form_time: cx.new(|cx| InputState::new(window, cx)),
+            event_title: cx.new(|cx| InputState::new(window, cx)),
+            event_time: cx.new(|cx| InputState::new(window, cx)),
+            chapter_title: cx.new(|cx| InputState::new(window, cx)),
+            scene_time: cx.new(|cx| InputState::new(window, cx)),
             relation_note: cx.new(|cx| InputState::new(window, cx)),
             relation_time: cx.new(|cx| InputState::new(window, cx)),
             form_body: cx.new(|cx| TextareaState::new(window, cx).rows(5)),
@@ -419,6 +423,7 @@ impl ProjectView {
         self.scene_baseline = Some(scene.clone());
         self.page = Page::Scene;
         self.selected_scene = Some(id);
+        self.load_scene_time(id, window, cx);
         self.scene_opened(window, cx);
         cx.notify();
     }
@@ -568,6 +573,7 @@ impl ProjectView {
                             .child(
                                 Button::new("merge-apply")
                                     .label("Zusammenführung übernehmen")
+                                    .disabled(validation.is_err())
                                     .on_click(cx.listener(|view, _, window, cx| {
                                         let bytes = view.merge.read(cx).value().as_bytes().to_vec();
                                         view.resolve_conflict(
@@ -590,11 +596,15 @@ impl ProjectView {
         self.last_export = None;
         self.scene_text = None;
         self.scene_baseline = None;
-        self.form_title
+        self.event_title
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.form_body
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.form_time
+        self.event_time
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.chapter_title
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.scene_time
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.world.reset(window, cx);
         self.ai.reset(window, cx);
