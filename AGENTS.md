@@ -15,6 +15,7 @@
 
 - Nutze `test-driven-development` für Features, Fehlerbehebungen, Refactorings und Verhaltensänderungen. Schreibe zuerst einen Test und prüfe, dass er aus dem erwarteten Grund fehlschlägt. Implementiere die kleinste passende Änderung, prüfe den erfolgreichen Testlauf und räume bei Bedarf auf. Führe vor dem Abschluss die vollständige Testsuite aus und benenne etwaige Fehlschläge.
 - Automatisierte Tests müssen ohne Computer Use laufen. Bevorzuge Unit-Tests, wo sie das relevante Verhalten abdecken. Entkopple Anwendungslogik und Zustandsübergänge von der Oberfläche und mache externe Abhängigkeiten bei Bedarf ersetzbar, damit sich das Verhalten direkt testen lässt. Nutze automatisierte Integrationstests für Verhalten, das erst im Zusammenspiel mehrerer Komponenten entsteht.
+- Prüfe vor jedem geplanten Test mit Computer Use, ob ein Unit-Test oder ein GPUI-Komponententest das Verhalten abdecken kann. Verwende für Fachlogik einen Unit-Test und für Verhalten im gerenderten GPUI-Bedienelement einen Komponententest, wann immer das möglich ist. Führe den Bedienablauf nur dann selbst mit Computer Use aus, wenn das Prüfziel über diese Tests nicht erreichbar ist.
 - Verwende die jeweils neuesten stabilen Versionen der Entwicklungswerkzeuge, der Rust-Toolchain und der Abhängigkeiten. Prüfe die verfügbaren Versionen beim Einrichten und bei Aktualisierungen anhand der offiziellen Veröffentlichungen oder Paketregister. Prüfe nach Aktualisierungen den Build und die Tests.
 
 ## Git
