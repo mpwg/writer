@@ -26,3 +26,8 @@
 - Arbeite direkt auf `main`. Committe regelmäßig in kleinen, zusammenhängenden und geprüften Schritten und pushe diese Commits auf `origin/main`.
 - Nenne den beteiligten Agenten in jedem von ihm erstellten Commit als Co-Autor. Verwende dafür den Git-Trailer `Co-authored-by: Name <E-Mail>`. Für Codex lautet er `Co-authored-by: Codex <codex@openai.com>`.
 - Führe bei Pull Requests die beteiligten Agenten auch in der PR-Beschreibung als Co-Autoren auf.
+
+## Aufräumen
+
+- Lösche eigene temporäre Dateien, Logs, Testkopien und nicht mehr benötigte Build-Artefakte am Ende des Auftrags endgültig.
+- Beende selbst gestartete Test-Apps, Server und Hintergrundprozesse auch bei Abbruch oder blockierter Arbeit. Prüfe danach, dass sie beendet sind. Lass einen Prozess nur dann weiterlaufen, wenn der Nutzer es ausdrücklich verlangt.
